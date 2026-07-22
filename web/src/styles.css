@@ -1,0 +1,381 @@
+:root {
+  --bg: #f6f4f1;
+  --surface: #ffffff;
+  --surface-alt: #f0ece7;
+  --border: #ddd5cb;
+  --text: #22201d;
+  --muted: #6d675f;
+  --accent: #8a5a3b;
+  --accent-text: #ffffff;
+  --danger: #a33a2a;
+  --ok: #2f6b46;
+  --radius: 12px;
+  --tap: 48px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1917;
+    --surface: #242220;
+    --surface-alt: #2e2b28;
+    --border: #3d3936;
+    --text: #ece8e3;
+    --muted: #a09890;
+    --accent: #c2825a;
+    --accent-text: #1a1917;
+    --danger: #e08573;
+    --ok: #7cc39a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.app-header h1 {
+  font-size: 1.1rem;
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+
+.app-nav {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+  align-items: center;
+}
+
+.app-nav a {
+  padding: 0.55rem 0.9rem;
+  border-radius: var(--radius);
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.app-nav a.router-link-active {
+  background: var(--surface-alt);
+  color: var(--text);
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1rem 1rem 4rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.card > h2 {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-bottom: 0.3rem;
+}
+
+.field {
+  margin-bottom: 0.9rem;
+}
+
+.field:last-child {
+  margin-bottom: 0;
+}
+
+input[type='text'],
+input[type='email'],
+input[type='number'],
+select {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0.6rem 0.7rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+input:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-end;
+}
+
+.row > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: var(--tap);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.checkbox input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+  flex: none;
+}
+
+.seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.seg button {
+  flex: 1;
+  min-width: 90px;
+  min-height: var(--tap);
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.seg button[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.chips button {
+  min-height: 40px;
+  padding: 0.4rem 0.8rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.chips button[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Element-agnostic so RouterLink anchors pick these up identically to buttons. */
+.primary,
+.ghost,
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  text-decoration: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.primary {
+  width: 100%;
+  min-height: 54px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--accent-text);
+  background: var(--accent);
+  border: none;
+}
+
+.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ghost {
+  min-height: var(--tap);
+  padding: 0.5rem 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+.icon {
+  flex: none;
+  min-width: var(--tap);
+  height: var(--tap);
+  padding: 0 0.7rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.error {
+  padding: 0.7rem 0.85rem;
+  margin-bottom: 1rem;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.success {
+  border-color: var(--ok);
+}
+
+.success h2 {
+  color: var(--ok);
+}
+
+.mix-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.mix-row .name {
+  flex: 2;
+  font-weight: 600;
+}
+
+.mix-row .amount {
+  flex: 1;
+  max-width: 110px;
+}
+
+/* The bare × needs more weight than the text-labelled header buttons. */
+.mix-row .icon {
+  font-size: 1.35rem;
+}
+
+.mix-total {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 0.6rem;
+  margin-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.list-item {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.list-item .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.list-item strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Each detail line sits on its own row rather than running into the next. */
+.list-item .muted {
+  display: block;
+}
+
+.badge {
+  flex: none;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--surface-alt);
+  color: var(--muted);
+}
+
+dl.summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+dl.summary dt {
+  color: var(--muted);
+}
+
+dl.summary dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}

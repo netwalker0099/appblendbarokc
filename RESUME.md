@@ -17,7 +17,7 @@ This repo lives directly on the target VPS at `/opt/app` (hostname `app`, Ubuntu
 26.04). Docker, the Compose stack, and all validation in Milestones 1–3 have been
 run for real on this box, not in a separate sandbox.
 
-## Status: Milestones 1–3 done and validated live on this VPS
+## Status: Milestones 1–4 done and validated live on this VPS
 
 - **Milestone 1 (scaffold):** Compose (`db`/`api`/`caddy`), multi-stage Dockerfiles,
   Caddyfile, `.env.example`, README. `docker compose up --build` brings up all three
@@ -42,6 +42,12 @@ run for real on this box, not in a separate sandbox.
   (`/api/health` stays open). `POST /api/intake` is the one-shot stand submission,
   idempotent on a required `Idempotency-Key` header. All of this was exercised live
   against the running containers — see the validation list below.
+- **Milestone 4 (operator UI):** Vue 3 + vue-router SPA in `web/`. Device pairing
+  screen (token in `localStorage`, 401 forces re-pair), intake form with the mix
+  builder, and a lookup view with customer history and one-tap reorder. Backend
+  needed **no changes** — everything runs on the Milestone 3 endpoints. Validated
+  by driving a real headless browser through pair → intake → submit → lookup →
+  reorder against the live site; see `web/smoke.js`.
 
 ## Decisions locked in — don't re-litigate these
 
@@ -98,14 +104,34 @@ run for real on this box, not in a separate sandbox.
   - one operator device token issued, labeled "Stand iPad" (the raw token from
     that session is gone — issue a fresh one if you need to authenticate a client)
 
-  Decide before real launch: wipe this back to empty, or keep it as fixtures for
-  building the Milestone 4 UI against. Nobody has answered this yet.
+  Milestone 4 added more throwaway rows on top of that: `m4probe@example.com`,
+  `m4flow@example.com`, and one `smoke…@example.com` customer + order per smoke-test
+  run (each with a one-ingredient mix). Device tokens labelled `dev-session-*` and
+  `smoke` were also issued and are still active.
+
+  **Still unanswered, and now more urgent:** wipe all of this before launch, or keep
+  it as fixtures? The smoke test adds a row every run, so this only grows. Deactivate
+  the stray device tokens (`update operator_devices set active = false where label
+  like 'dev-session-%' or label = 'smoke'`) whenever you clean up.
+
+## Frontend decisions locked in (Milestone 4)
+
+- **Operator-driven, not a customer kiosk.** Staff hold the tablet, so the UI shows
+  order status and amount. A customer-facing self-serve mode was considered and
+  explicitly not built.
+- **vue-router in history mode.** Caddy's `try_files {path} /index.html` already
+  serves deep links; a guard bounces every route but `/pair` when no token is stored.
+- **Base-formula entry.** The builder takes 3.4oz amounts and displays the 1.7oz /
+  roller amounts derived (`web/src/lib/bottle.js`), matching how the API stores them.
+- **`step="any"` on the mix amount input** — do not "tidy" this to a fixed step.
+  With `step="0.1"` and `min="0.01"` the browser silently refuses to submit round
+  numbers like `1`, which is exactly what the builder defaults to. This bug was
+  found by the smoke test and it fails invisibly.
+- **Style hooks are class-based** (`.primary` / `.ghost` / `.icon`, not
+  `button.primary`) so `RouterLink` anchors pick up the same styling as buttons.
 
 ## Not started
 
-- **Milestone 4** — Vue intake + mix-builder UI + reorder view. `web/` still only
-  has the Milestone 1 placeholder page that fetches `/api/health`. Nothing else
-  has been built on the frontend.
 - **Milestone 5** — Squarespace sync layer (Contacts + Orders APIs) behind a
   mockable trait. Not started; `SQUARESPACE_API_KEY` in `.env` is blank.
 - **Milestone 6** — Webhook receiver + signature verification + reconciliation.
@@ -125,4 +151,7 @@ run for real on this box, not in a separate sandbox.
 1. `cd /opt/app && git status` — see whether anything's changed since this was
    written; commit first if not already done.
 2. `docker compose ps` — confirm the stack is still healthy.
-3. Skim this file and `README.md`, then ask for the Milestone 4 plan to continue.
+3. Skim this file and `README.md`, then ask for the Milestone 5 plan to continue.
+   Milestone 7 (`GET /api/customers/:id/reorder`) is worth pulling forward if the
+   lookup view's three-call sequence (customer → mixes → each mix detail) starts
+   feeling slow on the stand's connection.

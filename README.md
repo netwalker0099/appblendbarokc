@@ -52,12 +52,40 @@ docker compose exec caddy wget -qO- http://api:8080/api/health
 
 - `api`: `cd api && cargo run` (requires a local Postgres reachable at `DATABASE_URL`
   once the schema lands in a later milestone).
-- `web`: `cd web && npm install && npm run dev` — Vite dev server; point it at a
-  running `api` container for `/api/*` calls, or adjust `vite.config.js` to proxy to
-  `http://localhost:8080` during development.
+- `web`: `cd web && npm install && npm run dev` — Vite dev server. `/api/*` is proxied
+  to `http://localhost:8080`; override with `API_ORIGIN=... npm run dev`.
+
+## Operator UI
+
+The UI is operator-driven: staff run it on the stand tablet. It needs a device token
+before it will do anything.
+
+```bash
+docker compose exec api blendbar-api issue-device-token "Stand iPad"
+```
+
+Open the site, paste the token on the pairing screen, and it is kept in
+`localStorage` until "Unpair" is used or the API rejects it (a 401 forces re-pairing).
+
+- **Intake** — customer details, marketing consent, scent preferences, and the order
+  (type, bottle size, status, amount). Custom mixes use the mix builder, capped at 8
+  ingredients. Amounts are entered as the 3.4oz base formula; the 1.7oz and roller
+  amounts are shown derived, never stored.
+- **Lookup** — search customers by email, see their saved mixes and orders, and
+  "Reorder" a mix to open intake with that customer and mix prefilled.
+
+Each submission carries a generated `Idempotency-Key` that is held steady across
+retries, so a double-tap or a flaky connection cannot create two orders.
+
+### Smoke test
+
+`web/smoke.js` drives the whole flow in a real headless browser against a running
+stack. It writes one customer and one order per run — see the header comment in that
+file for the exact command.
 
 ## Status
 
-Milestone 1 (scaffold): Compose + Caddy + empty Rust service + Vue app, TLS and a
-hello-world request proxied end to end via `GET /api/health`. No database schema,
-auth, or Squarespace integration yet — see the build plan for subsequent milestones.
+Milestones 1–4 are done and validated live on the VPS: scaffold + TLS, schema,
+operator auth / CRUD / intake, and the operator UI described above. Squarespace sync
+(5), the webhook receiver and reconciliation (6), and `GET /api/customers/:id/reorder`
+(7) are not started — see `RESUME.md` for the current state and open questions.
