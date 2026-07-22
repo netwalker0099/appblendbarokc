@@ -1,0 +1,13 @@
+{$DOMAIN} {
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+
+	handle {
+		root * /usr/share/caddy
+		try_files {path} /index.html
+		file_server
+	}
+
+	encode gzip
+}

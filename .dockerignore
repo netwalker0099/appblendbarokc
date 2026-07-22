@@ -1,0 +1,5 @@
+.git
+.env
+/api/target/
+/web/node_modules/
+/web/dist/
