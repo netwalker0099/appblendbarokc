@@ -21,8 +21,17 @@ run for real on this box, not in a separate sandbox.
 
 - **Milestone 1 (scaffold):** Compose (`db`/`api`/`caddy`), multi-stage Dockerfiles,
   Caddyfile, `.env.example`, README. `docker compose up --build` brings up all three
-  healthy. Caddy TLS is blocked purely on DNS — `app.theblendbarokc.com` isn't
-  pointed at this VPS yet, so ACME retries harmlessly every 60s in the background.
+  healthy. **DNS is now pointed at this VPS and TLS is live** — as of 2026-07-22,
+  `https://app.theblendbarokc.com` serves a real production Let's Encrypt cert
+  (verified via `curl`, `/api/health` returns 200 through Caddy). Caddy had
+  auto-fallen back to the LE *staging* CA during the earlier NXDOMAIN period;
+  a `docker compose restart caddy` after DNS propagated pulled a production cert
+  immediately. If TLS ever looks untrusted, check which CA the logs name.
+  - **Gotcha when testing from this box:** `/etc/hosts` maps
+    `app.theblendbarokc.com` to `127.0.1.1` (Ubuntu's FQDN line), so local `curl`
+    hits loopback and does *not* prove external reachability. For a real
+    external-path test use
+    `curl --resolve app.theblendbarokc.com:443:64.177.120.80 ...`.
 - **Milestone 2 (schema):** `api/migrations/0001_init.sql` — customers, ingredients,
   scents, customer_scent_preferences, mixes, mix_items, orders. Rust models in
   `api/src/models/`. Migrations run automatically at API boot via `sqlx::migrate!`
@@ -106,7 +115,6 @@ run for real on this box, not in a separate sandbox.
 
 ## Open items nobody has answered yet
 
-- DNS for `app.theblendbarokc.com` still isn't pointed at this VPS.
 - Squarespace API key not yet obtained or set.
 - Squarespace webhook signing-secret handling — will come up when Milestone 6
   starts; no decision made.
