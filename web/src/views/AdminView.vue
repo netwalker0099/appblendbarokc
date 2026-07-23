@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 
 import CatalogManager from '../components/CatalogManager.vue'
 import ScentManager from '../components/ScentManager.vue'
+import { INGREDIENT_TYPES } from '../lib/bottle.js'
 import { api } from '../lib/api.js'
 
 const router = useRouter()
@@ -53,9 +54,9 @@ async function refreshIntegration() {
   }
 }
 
-async function addIngredient(name) {
+async function addIngredient(name, type) {
   try {
-    ingredients.value = [...ingredients.value, await api.createIngredient(name)]
+    ingredients.value = [...ingredients.value, await api.createIngredient(name, type)]
     flash(`Added ingredient “${name}”.`)
   } catch (err) {
     handle(err)
@@ -64,6 +65,14 @@ async function addIngredient(name) {
 async function toggleIngredient(item) {
   try {
     const updated = await api.updateIngredient(item.id, { active: !item.active })
+    ingredients.value = ingredients.value.map((i) => (i.id === updated.id ? updated : i))
+  } catch (err) {
+    handle(err)
+  }
+}
+async function setIngredientType(item, type) {
+  try {
+    const updated = await api.updateIngredient(item.id, { type })
     ingredients.value = ingredients.value.map((i) => (i.id === updated.id ? updated : i))
   } catch (err) {
     handle(err)
@@ -130,8 +139,10 @@ function formatTime(value) {
       title="Ingredients"
       noun="ingredient"
       :items="ingredients"
+      :types="INGREDIENT_TYPES"
       @add="addIngredient"
       @toggle="toggleIngredient"
+      @set-type="setIngredientType"
     />
 
     <ScentManager

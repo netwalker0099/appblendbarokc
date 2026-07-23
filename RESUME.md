@@ -127,6 +127,18 @@ below. All planned milestones are now complete.)
     in `verify_signature`; and `HttpSquarespace::get_order`'s response field
     mapping. The dev secret `dev_webhook_secret_change_me` is set in `.env` (git-
     ignored) purely so the receiver is enabled for testing — replace it.
+- **Ingredient types (Base / Top Note / Heart Note):** every ingredient has a
+  perfumery `type` (migration 0006: `ingredients.type` text, NOT NULL default
+  `heart_note`, checked in `('base','top_note','heart_note')`; seeded Bergamot→
+  top_note, Sandalwood→base). `IngredientType` enum in `models/ingredient.rs`
+  (field `ingredient_type`, `#[sqlx/serde(rename="type")]`, JSON key `type`).
+  Create **requires** `type` (422 if missing/invalid); update takes optional
+  `type`. Frontend: `INGREDIENT_TYPES` in `lib/bottle.js`; admin `CatalogManager`
+  gained an add-time type picker + per-row type select + type label (sorted by
+  type); `MixBuilder` groups both its pickers with `<optgroup>` by type — so the
+  grouping applies to custom mixes **and** scent formulas (ScentManager reuses
+  MixBuilder). Validated live (API: list/create/missing-422/invalid-422/update;
+  browser: add-with-type, edit type, picker optgroups render).
 - **Scent formulas (recipes):** set-perfume scents now carry an ingredient
   breakdown like custom mixes. `scent_items` table (migration 0005, same shape/
   rules as `mix_items`; formula may be empty = "not defined yet"). `scents.rs`

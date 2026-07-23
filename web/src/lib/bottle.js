@@ -12,6 +12,18 @@ export const ORDER_TYPES = [
   { value: 'set_perfume', label: 'Set perfume' },
 ]
 
+/// Perfumery classification for ingredients. Order here drives grouping order in
+/// the mix/scent builders and the admin picker.
+export const INGREDIENT_TYPES = [
+  { value: 'base', label: 'Base' },
+  { value: 'top_note', label: 'Top Note' },
+  { value: 'heart_note', label: 'Heart Note' },
+]
+
+export function ingredientTypeLabel(value) {
+  return INGREDIENT_TYPES.find((t) => t.value === value)?.label ?? value
+}
+
 export const ORDER_STATUSES = [
   { value: 'paid', label: 'Paid' },
   { value: 'lead', label: 'Lead' },

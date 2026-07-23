@@ -55,7 +55,7 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
 
 export const api = {
   listIngredients: () => request('/ingredients'),
-  createIngredient: (name) => request('/ingredients', { method: 'POST', body: { name } }),
+  createIngredient: (name, type) => request('/ingredients', { method: 'POST', body: { name, type } }),
   updateIngredient: (id, patch) => request(`/ingredients/${id}`, { method: 'PATCH', body: patch }),
   listScents: () => request('/scents'),
   createScent: (name) => request('/scents', { method: 'POST', body: { name } }),

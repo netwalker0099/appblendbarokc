@@ -74,9 +74,12 @@ Open the site, paste the token on the pairing screen, and it is kept in
 - **Lookup** — search customers by email, see their saved mixes and orders, and
   "Reorder" a mix to open intake with that customer and mix prefilled.
 - **Admin** — manage the ingredient and scent catalogs (add, activate/deactivate).
-  Each scent carries an editable **ingredient formula** (a house recipe), built
-  with the same mix builder as custom mixes; set-perfume orders show that breakdown
-  in intake and in a customer's order history. Also shows the Squarespace
+  Every ingredient is classified by perfumery **type** — Base, Top Note, or Heart
+  Note — set on add and editable per row; the mix/scent builders group their
+  ingredient picker by type. Each scent carries an editable **ingredient formula**
+  (a house recipe), built with the same mix builder as custom mixes; set-perfume
+  orders show that breakdown in intake and in a customer's order history. Also
+  shows the Squarespace
   integration status: push backend (mock vs. live),
   whether the webhook receiver is enabled, sync job counts with a retry button,
   and recent inbound webhooks. Server-side secrets (`SQUARESPACE_API_KEY`,

@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::models::ingredient::Ingredient;
+use crate::models::ingredient::{Ingredient, IngredientType};
 use crate::models::mix::MAX_MIX_INGREDIENTS;
 use crate::AppState;
 
@@ -20,6 +20,8 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<Ingredient>>
 #[derive(Deserialize)]
 pub struct CreateIngredientRequest {
     pub name: String,
+    #[serde(rename = "type")]
+    pub ingredient_type: IngredientType,
 }
 
 pub async fn create(
@@ -31,11 +33,13 @@ pub async fn create(
         return Err(AppError::BadRequest("name is required".into()));
     }
 
-    let ingredient =
-        sqlx::query_as::<_, Ingredient>("insert into ingredients (name) values ($1) returning *")
-            .bind(name)
-            .fetch_one(&state.db)
-            .await
+    let ingredient = sqlx::query_as::<_, Ingredient>(
+        "insert into ingredients (name, type) values ($1, $2) returning *",
+    )
+    .bind(name)
+    .bind(body.ingredient_type)
+    .fetch_one(&state.db)
+    .await
             .map_err(|e| match &e {
                 sqlx::Error::Database(db_err) if db_err.is_unique_violation() => {
                     AppError::Conflict("an ingredient with this name already exists".into())
@@ -50,6 +54,8 @@ pub async fn create(
 pub struct UpdateIngredientRequest {
     pub name: Option<String>,
     pub active: Option<bool>,
+    #[serde(rename = "type")]
+    pub ingredient_type: Option<IngredientType>,
 }
 
 pub async fn update(
@@ -58,11 +64,12 @@ pub async fn update(
     Json(body): Json<UpdateIngredientRequest>,
 ) -> Result<Json<Ingredient>, AppError> {
     let ingredient = sqlx::query_as::<_, Ingredient>(
-        "update ingredients set name = coalesce($2, name), active = coalesce($3, active) where id = $1 returning *",
+        "update ingredients set name = coalesce($2, name), active = coalesce($3, active), type = coalesce($4, type) where id = $1 returning *",
     )
     .bind(id)
     .bind(body.name)
     .bind(body.active)
+    .bind(body.ingredient_type)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound("ingredient not found".into()))?;

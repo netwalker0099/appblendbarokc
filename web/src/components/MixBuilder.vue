@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 
-import { bottleLabel, formatMl, scaleMl, totalMl } from '../lib/bottle.js'
+import { INGREDIENT_TYPES, bottleLabel, formatMl, scaleMl, totalMl } from '../lib/bottle.js'
 
 /// Mirrors MAX_MIX_INGREDIENTS in the API. The server is still the authority —
 /// this only keeps the operator from building a mix that would be rejected.
@@ -27,6 +27,20 @@ const atCap = computed(() => props.modelValue.length >= MAX_INGREDIENTS)
 
 function nameFor(id) {
   return props.ingredients.find((i) => i.id === id)?.name ?? 'Unknown ingredient'
+}
+
+/// Splits a list of ingredients into the perfumery type groups (in the order
+/// defined by INGREDIENT_TYPES), dropping empties. Anything with an unexpected
+/// type lands in a trailing "Other" group so it can't vanish from the picker.
+function groupByType(list) {
+  const known = new Set(INGREDIENT_TYPES.map((t) => t.value))
+  const groups = INGREDIENT_TYPES.map((t) => ({
+    label: t.label,
+    items: list.filter((i) => i.type === t.value),
+  }))
+  const other = list.filter((i) => !known.has(i.type))
+  if (other.length) groups.push({ label: 'Other', items: other })
+  return groups.filter((g) => g.items.length)
 }
 
 /// The ingredients a given row may switch to: every active ingredient except
@@ -91,9 +105,11 @@ function removeAt(index) {
         :aria-label="`Ingredient ${index + 1}`"
         @change="setIngredient(index, $event.target.value)"
       >
-        <option v-for="option in optionsFor(index)" :key="option.id" :value="option.id">
-          {{ option.name }}{{ option.active ? '' : ' (inactive)' }}
-        </option>
+        <optgroup v-for="group in groupByType(optionsFor(index))" :key="group.label" :label="group.label">
+          <option v-for="option in group.items" :key="option.id" :value="option.id">
+            {{ option.name }}{{ option.active ? '' : ' (inactive)' }}
+          </option>
+        </optgroup>
       </select>
       <input
         class="amount"
@@ -116,9 +132,11 @@ function removeAt(index) {
         <label for="add-ingredient">Add ingredient</label>
         <select id="add-ingredient" v-model="picking" @change="addIngredient">
           <option value="">Choose…</option>
-          <option v-for="ingredient in available" :key="ingredient.id" :value="ingredient.id">
-            {{ ingredient.name }}
-          </option>
+          <optgroup v-for="group in groupByType(available)" :key="group.label" :label="group.label">
+            <option v-for="ingredient in group.items" :key="ingredient.id" :value="ingredient.id">
+              {{ ingredient.name }}
+            </option>
+          </optgroup>
         </select>
       </div>
     </div>
