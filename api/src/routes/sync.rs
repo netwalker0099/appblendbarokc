@@ -31,6 +31,7 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<Value>, AppErr
 
     Ok(Json(json!({
         "backend": state.squarespace.name(),
+        "webhook_receiver_enabled": state.webhook_secret.is_some(),
         "counts": counts,
         "recent_failures": recent_failures,
     })))

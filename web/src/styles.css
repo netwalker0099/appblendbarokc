@@ -277,6 +277,38 @@ button:focus-visible {
   font-weight: 600;
 }
 
+.notice {
+  padding: 0.7rem 0.85rem;
+  margin-bottom: 1rem;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--ok) 14%, var(--surface));
+  border: 1px solid var(--ok);
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+.badge.ok-badge {
+  background: color-mix(in srgb, var(--ok) 20%, var(--surface));
+  color: var(--ok);
+}
+
+/* Deactivated catalog rows read as dimmed but still legible. */
+.list-item.inactive {
+  opacity: 0.6;
+}
+
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.85em;
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  background: var(--surface-alt);
+}
+
 .success {
   border-color: var(--ok);
 }

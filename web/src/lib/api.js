@@ -55,7 +55,14 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
 
 export const api = {
   listIngredients: () => request('/ingredients'),
+  createIngredient: (name) => request('/ingredients', { method: 'POST', body: { name } }),
+  updateIngredient: (id, patch) => request(`/ingredients/${id}`, { method: 'PATCH', body: patch }),
   listScents: () => request('/scents'),
+  createScent: (name) => request('/scents', { method: 'POST', body: { name } }),
+  updateScent: (id, patch) => request(`/scents/${id}`, { method: 'PATCH', body: patch }),
+  getSyncStatus: () => request('/sync/status'),
+  retrySync: () => request('/sync/retry', { method: 'POST' }),
+  listWebhooks: () => request('/webhooks/recent'),
   listCustomers: (email) =>
     request(email ? `/customers?email=${encodeURIComponent(email)}` : '/customers'),
   getCustomer: (id) => request(`/customers/${id}`),

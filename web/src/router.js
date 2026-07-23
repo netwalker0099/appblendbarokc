@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { deviceToken } from './lib/api.js'
+import AdminView from './views/AdminView.vue'
 import IntakeView from './views/IntakeView.vue'
 import LookupView from './views/LookupView.vue'
 import PairDevice from './views/PairDevice.vue'
@@ -9,6 +10,7 @@ const routes = [
   { path: '/', redirect: { name: 'intake' } },
   { path: '/intake', name: 'intake', component: IntakeView },
   { path: '/lookup', name: 'lookup', component: LookupView },
+  { path: '/admin', name: 'admin', component: AdminView },
   { path: '/pair', name: 'pair', component: PairDevice },
 ]
 

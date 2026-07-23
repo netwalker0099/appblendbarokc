@@ -18,6 +18,7 @@ function unpair() {
     <nav class="app-nav" v-if="deviceToken">
       <RouterLink :to="{ name: 'intake' }">Intake</RouterLink>
       <RouterLink :to="{ name: 'lookup' }">Lookup</RouterLink>
+      <RouterLink :to="{ name: 'admin' }">Admin</RouterLink>
       <button class="icon" type="button" title="Unpair this device" @click="unpair">Unpair</button>
     </nav>
   </header>

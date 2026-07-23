@@ -73,6 +73,11 @@ Open the site, paste the token on the pairing screen, and it is kept in
   amounts are shown derived, never stored.
 - **Lookup** — search customers by email, see their saved mixes and orders, and
   "Reorder" a mix to open intake with that customer and mix prefilled.
+- **Admin** — manage the ingredient and scent catalogs (add, activate/deactivate)
+  and view the Squarespace integration status: push backend (mock vs. live),
+  whether the webhook receiver is enabled, sync job counts with a retry button,
+  and recent inbound webhooks. Server-side secrets (`SQUARESPACE_API_KEY`,
+  `SQUARESPACE_WEBHOOK_SECRET`) are set in `.env`, not from the UI.
 
 Each submission carries a generated `Idempotency-Key` that is held steady across
 retries, so a double-tap or a flaky connection cannot create two orders.
