@@ -5,6 +5,7 @@ pub mod mixes;
 pub mod orders;
 pub mod scents;
 pub mod sync;
+pub mod webhooks;
 
 use axum::middleware;
 use axum::routing::{get, patch, post};
@@ -37,6 +38,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/intake", post(intake::intake))
         .route("/api/sync/status", get(sync::status))
         .route("/api/sync/retry", post(sync::retry))
+        .route("/api/webhooks/recent", get(webhooks::recent))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_operator_token,
@@ -44,6 +46,8 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/api/health", get(crate::health))
+        // Public but HMAC-verified — Squarespace can't present an operator token.
+        .route("/api/webhooks/squarespace", post(webhooks::receive))
         .merge(authed)
         .with_state(state)
 }

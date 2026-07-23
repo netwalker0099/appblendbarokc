@@ -25,6 +25,16 @@ pub struct ContactPush {
     pub marketing_consent: bool,
 }
 
+/// Authoritative order state fetched back from Squarespace during reconciliation
+/// (Milestone 6). A webhook only carries an order id, so we fetch the real status.
+#[derive(Debug)]
+pub struct RemoteOrder {
+    /// Squarespace fulfilment status, e.g. "PENDING" / "FULFILLED" / "CANCELED".
+    pub fulfillment_status: String,
+    pub paid: bool,
+    pub grand_total: Option<Decimal>,
+}
+
 /// An order to create in Squarespace Orders.
 #[derive(Debug)]
 pub struct OrderPush {
@@ -84,6 +94,10 @@ pub trait Squarespace: Send + Sync {
 
     /// Create the order, returning its Squarespace id.
     async fn create_order(&self, order: &OrderPush) -> Result<String, SyncError>;
+
+    /// Fetch authoritative state for an order by its Squarespace id — used by the
+    /// webhook receiver to reconcile, since the webhook itself only carries the id.
+    async fn get_order(&self, squarespace_order_id: &str) -> Result<RemoteOrder, SyncError>;
 }
 
 /// Pick the live HTTP client when `SQUARESPACE_API_KEY` is set, otherwise the

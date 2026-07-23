@@ -99,10 +99,23 @@ client's request shapes are untested against Squarespace until then.
 - `GET /api/sync/status` — active backend, job counts by state, recent failures.
 - `POST /api/sync/retry` — requeue every failed job (the manual "try again now").
 
+### Inbound webhooks (payments coming back)
+
+Payment is taken at the stand through the Squarespace POS, so Squarespace tells us
+when an order is paid/fulfilled via a webhook. `POST /api/webhooks/squarespace` is a
+public but **HMAC-verified** endpoint (Squarespace can't send an operator token): it
+verifies the signature against `SQUARESPACE_WEBHOOK_SECRET`, dedups on the
+notification id, fetches the order's authoritative state back from Squarespace, and
+reconciles our matching order's status. **When `SQUARESPACE_WEBHOOK_SECRET` is unset
+the receiver is disabled and returns 503** — it mutates order status, so it never
+runs unauthenticated.
+
+- `GET /api/webhooks/recent` — recent webhook activity (topic, status, match) for
+  debugging reconciliation.
+
 ## Status
 
-Milestones 1–5 and 7 are done and validated live on the VPS: scaffold + TLS, schema,
+Milestones 1–7 are done and validated live on the VPS: scaffold + TLS, schema,
 operator auth / CRUD / intake, the operator UI, the reorder endpoint, and the
-Squarespace sync layer above (validated end-to-end against the mock). The webhook
-receiver and reconciliation (6) are not started — see `RESUME.md` for current state
-and open questions.
+Squarespace sync layer + webhook receiver (both validated end-to-end against the
+mock). See `RESUME.md` for current state and open questions.

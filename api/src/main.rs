@@ -18,6 +18,9 @@ use crate::squarespace::Squarespace;
 pub struct AppState {
     pub db: PgPool,
     pub squarespace: Arc<dyn Squarespace>,
+    /// Shared secret for verifying inbound Squarespace webhook signatures. `None`
+    /// disables the webhook receiver (it returns 503 rather than trust anything).
+    pub webhook_secret: Option<Arc<str>>,
 }
 
 #[tokio::main]
@@ -47,9 +50,22 @@ async fn main() {
         .expect("failed to connect to database or run migrations");
     tracing::info!("database connected and migrations applied");
 
+    let webhook_secret: Option<Arc<str>> = std::env::var("SQUARESPACE_WEBHOOK_SECRET")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| Arc::from(s.as_str()));
+    if webhook_secret.is_some() {
+        tracing::info!("squarespace webhook receiver enabled (signing secret present)");
+    } else {
+        tracing::warn!(
+            "SQUARESPACE_WEBHOOK_SECRET unset — webhook receiver disabled (returns 503)"
+        );
+    }
+
     let state = AppState {
         db,
         squarespace: squarespace::from_env(),
+        webhook_secret,
     };
 
     // Drain the Squarespace outbox in the background for the life of the process.

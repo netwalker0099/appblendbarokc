@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use super::{ContactPush, OrderPush, Squarespace, SyncError};
+use super::{ContactPush, OrderPush, RemoteOrder, Squarespace, SyncError};
 
 /// In-process stand-in for Squarespace. Returns a deterministic id derived from
 /// the entity's uuid (so re-runs are stable and the written-back id is
@@ -32,5 +32,17 @@ impl Squarespace for MockSquarespace {
             order.description
         );
         Ok(format!("mock_order_{}", order.id.simple()))
+    }
+
+    async fn get_order(&self, squarespace_order_id: &str) -> Result<RemoteOrder, SyncError> {
+        // A stand order is taken through the Squarespace POS, so the mock reports
+        // it as paid and pending fulfilment — enough to drive reconciliation from
+        // a local 'lead'/'paid' order to 'paid'. Never fails.
+        tracing::info!(order_id = %squarespace_order_id, "[mock squarespace] get_order");
+        Ok(RemoteOrder {
+            fulfillment_status: "PENDING".to_string(),
+            paid: true,
+            grand_total: None,
+        })
     }
 }

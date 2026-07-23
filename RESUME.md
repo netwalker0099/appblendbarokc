@@ -1,6 +1,6 @@
 # Blend Bar — Resume Notes
 
-Last updated: 2026-07-23, after Milestone 5 (Squarespace sync against the mock).
+Last updated: 2026-07-23, after Milestone 6 (Squarespace webhook receiver, mock).
 
 Read this first in a new session, then README.md for deploy mechanics.
 
@@ -19,11 +19,12 @@ This repo lives directly on the target VPS at `/opt/app` (hostname `app`, Ubuntu
 26.04). Docker, the Compose stack, and all validation in Milestones 1–3 have been
 run for real on this box, not in a separate sandbox.
 
-## Status: Milestones 1–5 + 7 done and validated live on this VPS
+## Status: Milestones 1–7 done and validated live on this VPS
 
-(Milestone 6 — the webhook receiver + reconciliation — is not started. Milestone 5
-is built and validated **against the mock**; its live Squarespace HTTP path is
-untested because there's still no API key. See the Milestone 5 entry below.)
+(Milestones 5 and 6 — Squarespace push sync and the inbound webhook receiver — are
+built and validated **against the mock**; their live Squarespace HTTP paths are
+untested because there's still no API key or real webhook secret. See their entries
+below. All planned milestones are now complete.)
 
 - **Milestone 1 (scaffold):** Compose (`db`/`api`/`caddy`), multi-stage Dockerfiles,
   Caddyfile, `.env.example`, README. `docker compose up --build` brings up all three
@@ -98,6 +99,34 @@ untested because there's still no API key. See the Milestone 5 entry below.)
     note rustls has two versions in the tree now (sqlx + reqwest); the reqwest
     client is never even constructed under the mock, so no crypto-provider issue
     shows up until the live path is used — verify it there.
+- **Milestone 6 (Squarespace webhook receiver — mock-validated):** inbound
+  payment/fulfilment reconciliation. Payment is taken via the Squarespace POS, so
+  Squarespace webhooks tell us when an order is paid/fulfilled.
+  - `POST /api/webhooks/squarespace` (`api/src/routes/webhooks.rs`) is **public but
+    HMAC-verified** — it's in the *open* router (Squarespace can't send an operator
+    token), not behind the bearer middleware. Verifies HMAC-SHA256 of the raw body
+    against `SQUARESPACE_WEBHOOK_SECRET` (constant-time via `mac.verify_slice`).
+    **Unset secret ⇒ receiver disabled, returns 503** (`AppError::Unavailable`);
+    `AppState.webhook_secret: Option<Arc<str>>` loaded in main.rs.
+  - Flow: verify sig → dedup/audit in `webhook_events` (migration 0004; unique
+    notification id, statuses received/processed/unmatched/ignored/failed) →
+    `order.*` topics fetch authoritative state via the new
+    `Squarespace::get_order` (mock returns paid+PENDING⇒maps to 'paid'; real client
+    GETs `/commerce/orders/{id}`, untested) → `update orders … where
+    squarespace_order_id = $1` (the id M5 stored) → settle the event. No local
+    match ⇒ 'unmatched' (order taken directly in POS), not an error. Transient
+    `get_order` failure ⇒ 500 so Squarespace redelivers; a redelivered
+    already-terminal notification is acked 200 without reprocessing.
+  - `GET /api/webhooks/recent` (authed) lists recent events for debugging.
+  - **Validated live against the mock:** signed `order.update` flipped a 'lead'
+    order to 'paid' (event 'processed', matched); redelivery stayed at 1 row / one
+    process; bad signature ⇒ 401 with nothing recorded; unknown order id ⇒
+    'unmatched'; non-order topic ⇒ 'ignored'.
+  - **Untested & to check when a real webhook secret/key land:** the signature
+    header name (`Squarespace-Signature`) and encoding (hex) — a documented guess
+    in `verify_signature`; and `HttpSquarespace::get_order`'s response field
+    mapping. The dev secret `dev_webhook_secret_change_me` is set in `.env` (git-
+    ignored) purely so the receiver is enabled for testing — replace it.
 - **Mix-builder editing (same session):** each mix row is now an editable
   `<select class="name">` so an operator can swap an ingredient in place without
   losing its amount (`MixBuilder.vue::setIngredient` / `optionsFor`). A row's
@@ -192,9 +221,13 @@ untested because there's still no API key. See the Milestone 5 entry below.)
 
 ## Not started
 
-- **Milestone 6** — Webhook receiver + signature verification + reconciliation
-  (Squarespace order webhooks coming back *in*). Not started. Builds naturally on
-  the M5 outbox/sync-status plumbing.
+All seven planned milestones are complete. What remains is going live for real:
+- Obtain a Squarespace **API key** → set `SQUARESPACE_API_KEY`, restart; the sync
+  layer switches from mock to `HttpSquarespace`. Verify its untested request
+  shapes (see M5 entry).
+- Obtain the real webhook **signing secret** for the subscription → replace the
+  dev value in `.env`; verify the signature header/encoding and `get_order`
+  mapping (see M6 entry). Register the webhook subscription in Squarespace.
 
 ## Open items nobody has answered yet
 
@@ -203,25 +236,24 @@ untested because there's still no API key. See the Milestone 5 entry below.)
   live `HttpSquarespace` path takes over — but its request shapes are unverified
   (see the M5 entry) and there are stale `mock_*` ids already written on existing
   rows that a real sync won't overwrite for orders (contacts re-upsert fine).
-- Squarespace webhook signing-secret handling — will come up when Milestone 6
-  starts; no decision made.
-- Whether to wipe or keep the fixture data described above (now also includes M5
-  sync-test customers/orders carrying `mock_*` external ids).
+- **Webhook signing secret is a dev placeholder.** `SQUARESPACE_WEBHOOK_SECRET`
+  in `.env` is `dev_webhook_secret_change_me` so the receiver is enabled for
+  testing. Replace with the real subscription secret before going live, and
+  register the subscription on the Squarespace side.
+- Whether to wipe or keep the fixture data described above (now also includes M5/M6
+  sync-test customers/orders carrying `mock_*` ids and rows in `webhook_events`).
 
 ## How to pick this back up
 
 1. `cd /opt/app && git status` — see whether anything's changed since this was
    written; commit first if not already done.
 2. `docker compose ps` — confirm the stack is still healthy.
-3. Skim this file and `README.md`. The next real milestone is **6** (webhook
-   receiver + reconciliation). Before starting it, the webhook signing-secret
-   handling needs a decision (open item above). M6 consumes Squarespace order
-   webhooks coming back in and reconciles them against our orders — the M5
-   outbox/`/api/sync/status` plumbing is the foundation to build on.
-   Alternatively, if the Squarespace API key finally lands, the highest-value
-   quick task is verifying the untested `HttpSquarespace` live path.
+3. Skim this file and `README.md`. All seven milestones are done; the remaining
+   work is going live (see "Not started" above): get the Squarespace API key +
+   real webhook secret, swap them in, and verify the two untested live HTTP paths
+   (`HttpSquarespace` push/`get_order` and the webhook signature wire format).
 
-Note: device-token validation this session left deactivated `m5-validate`,
-`verify`, `m7-validate`, and `smoke` tokens plus a deactivated `Vetiver
-(swap-test)` ingredient in the DB, and M5 testing added a few sync-test customers/
-orders carrying `mock_*` ids — all part of the fixture-cruft-vs-wipe question above.
+Note: validation across sessions left several deactivated device tokens
+(`m5-validate`, `m6-validate`, `verify`, `m7-validate`, `smoke`) and a deactivated
+`Vetiver (swap-test)` ingredient in the DB, plus mock-synced test customers/orders
+and `webhook_events` rows — all part of the fixture-cruft-vs-wipe question above.

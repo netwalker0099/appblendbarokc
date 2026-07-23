@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::{json, Value};
 
-use super::{ContactPush, OrderPush, Squarespace, SyncError};
+use super::{ContactPush, OrderPush, RemoteOrder, Squarespace, SyncError};
 
 const BASE_URL: &str = "https://api.squarespace.com/1.0";
 const USER_AGENT: &str = "blendbar-app/0.1 (+https://app.theblendbarokc.com)";
@@ -56,6 +56,30 @@ impl HttpSquarespace {
             })
         }
     }
+
+    async fn get(&self, path: &str) -> Result<Value, SyncError> {
+        let resp = self
+            .client
+            .get(format!("{BASE_URL}{path}"))
+            .bearer_auth(&self.api_key)
+            .send()
+            .await
+            .map_err(|e| SyncError::Transport(e.to_string()))?;
+
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        if status.is_success() {
+            Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
+        } else {
+            let code = status.as_u16();
+            let retryable = status.is_server_error() || code == 429;
+            Err(SyncError::Api {
+                status: code,
+                body: text,
+                retryable,
+            })
+        }
+    }
 }
 
 fn read_id(resp: &Value) -> Result<String, SyncError> {
@@ -90,5 +114,28 @@ impl Squarespace for HttpSquarespace {
         });
         let resp = self.post("/commerce/orders", body).await?;
         read_id(&resp)
+    }
+
+    async fn get_order(&self, squarespace_order_id: &str) -> Result<RemoteOrder, SyncError> {
+        let resp = self
+            .get(&format!("/commerce/orders/{squarespace_order_id}"))
+            .await?;
+        Ok(RemoteOrder {
+            fulfillment_status: resp
+                .get("fulfillmentStatus")
+                .and_then(Value::as_str)
+                .unwrap_or("PENDING")
+                .to_string(),
+            paid: resp
+                .get("financialStatus")
+                .and_then(Value::as_str)
+                .map(|s| s.eq_ignore_ascii_case("PAID"))
+                .unwrap_or(false),
+            grand_total: resp
+                .get("grandTotal")
+                .and_then(|v| v.get("value"))
+                .and_then(Value::as_str)
+                .and_then(|s| s.parse().ok()),
+        })
     }
 }
