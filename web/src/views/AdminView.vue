@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import CatalogManager from '../components/CatalogManager.vue'
+import ScentManager from '../components/ScentManager.vue'
 import { api } from '../lib/api.js'
 
 const router = useRouter()
@@ -71,7 +72,7 @@ async function toggleIngredient(item) {
 async function addScent(name) {
   try {
     scents.value = [...scents.value, await api.createScent(name)]
-    flash(`Added scent “${name}”.`)
+    flash(`Added scent “${name}”. Open “Formula” to set its ingredients.`)
   } catch (err) {
     handle(err)
   }
@@ -80,6 +81,16 @@ async function toggleScent(item) {
   try {
     const updated = await api.updateScent(item.id, { active: !item.active })
     scents.value = scents.value.map((s) => (s.id === updated.id ? updated : s))
+  } catch (err) {
+    handle(err)
+  }
+}
+async function saveScentFormula(scent, items) {
+  try {
+    const payload = items.map((i) => ({ ingredient_id: i.ingredient_id, amount_ml: Number(i.amount_ml) }))
+    const updated = await api.updateScent(scent.id, { items: payload })
+    scents.value = scents.value.map((s) => (s.id === updated.id ? updated : s))
+    flash(`Saved formula for “${scent.name}”.`)
   } catch (err) {
     handle(err)
   }
@@ -123,12 +134,12 @@ function formatTime(value) {
       @toggle="toggleIngredient"
     />
 
-    <CatalogManager
-      title="Scents"
-      noun="scent"
-      :items="scents"
+    <ScentManager
+      :scents="scents"
+      :ingredients="ingredients"
       @add="addScent"
       @toggle="toggleScent"
+      @save="saveScentFormula"
     />
 
     <div class="card">

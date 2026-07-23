@@ -127,6 +127,18 @@ below. All planned milestones are now complete.)
     in `verify_signature`; and `HttpSquarespace::get_order`'s response field
     mapping. The dev secret `dev_webhook_secret_change_me` is set in `.env` (git-
     ignored) purely so the receiver is enabled for testing — replace it.
+- **Scent formulas (recipes):** set-perfume scents now carry an ingredient
+  breakdown like custom mixes. `scent_items` table (migration 0005, same shape/
+  rules as `mix_items`; formula may be empty = "not defined yet"). `scents.rs`
+  `list`/`get` return `ScentDetail` (scent + items, flattened — backward compatible
+  with existing name/active consumers); `create`/`update` accept optional `items`
+  (reusing `MixItemInput` and `assert_active_ingredients`, transactional
+  delete+reinsert). The formula is referenced **live** from the scent, not
+  snapshotted per order — editing a scent changes what past set-perfume orders
+  display. Admin edits it via `components/ScentManager.vue` (reuses `MixBuilder`);
+  `LookupView` and `IntakeView` show the selected scent's breakdown. Validated
+  live (API: create/get/list/update/empty/duplicate-reject/order; browser: admin
+  editor saves, intake readout renders).
 - **Admin section (`/admin`, operator-authed):** catalog + integration UI.
   `web/src/views/AdminView.vue` + reusable `components/CatalogManager.vue`. Adds
   and activates/deactivates ingredients **and** scents from the UI (this is where

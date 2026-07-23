@@ -31,7 +31,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/ingredients/:id", patch(ingredients::update))
         .route("/api/scents", get(scents::list).post(scents::create))
-        .route("/api/scents/:id", patch(scents::update))
+        .route("/api/scents/:id", get(scents::get).patch(scents::update))
         .route("/api/mixes/:id", get(mixes::get).patch(mixes::update))
         .route("/api/orders", get(orders::list))
         .route("/api/orders/:id", get(orders::get).patch(orders::update))

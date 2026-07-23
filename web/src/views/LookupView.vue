@@ -75,6 +75,12 @@ function describeMix(mix) {
   return mix.items.map((i) => `${ingredientName(i.ingredient_id)} ${formatMl(i.amount_ml)}ml`).join(' · ')
 }
 
+function describeScent(id) {
+  const scent = scents.value.find((s) => s.id === id)
+  if (!scent || !scent.items?.length) return ''
+  return scent.items.map((i) => `${ingredientName(i.ingredient_id)} ${formatMl(i.amount_ml)}ml`).join(' · ')
+}
+
 function formatDate(value) {
   return new Date(value).toLocaleDateString(undefined, {
     year: 'numeric',
@@ -174,6 +180,12 @@ function formatDate(value) {
             <strong>
               {{ order.order_type === 'custom_mix' ? 'Custom mix' : scentName(order.scent_id) }}
             </strong>
+            <span
+              class="muted"
+              v-if="order.order_type === 'set_perfume' && describeScent(order.scent_id)"
+            >
+              {{ describeScent(order.scent_id) }}
+            </span>
             <span class="muted">
               {{ bottleLabel(order.size) }}
               <template v-if="order.amount"> · ${{ order.amount }}</template>

@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import MixBuilder from '../components/MixBuilder.vue'
 import { api } from '../lib/api.js'
-import { BOTTLE_SIZES, ORDER_STATUSES, ORDER_TYPES, bottleLabel } from '../lib/bottle.js'
+import { BOTTLE_SIZES, ORDER_STATUSES, ORDER_TYPES, bottleLabel, formatMl } from '../lib/bottle.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -39,6 +39,18 @@ function newKey() {
 }
 
 const activeScents = computed(() => scents.value.filter((s) => s.active))
+
+function ingredientName(id) {
+  return ingredients.value.find((i) => i.id === id)?.name ?? 'Unknown'
+}
+
+// The house formula for the currently selected set-perfume scent, shown so the
+// operator can see what's actually in it — the set-perfume analogue of the mix.
+const selectedScentFormula = computed(() => {
+  const scent = scents.value.find((s) => s.id === scentId.value)
+  if (!scent || !scent.items?.length) return ''
+  return scent.items.map((i) => `${ingredientName(i.ingredient_id)} ${formatMl(i.amount_ml)}ml`).join(' · ')
+})
 
 const canSubmit = computed(() => {
   if (busy.value) return false
@@ -287,6 +299,9 @@ function scentName(id) {
           {{ scent.name }}
         </button>
       </div>
+      <p class="muted" v-if="scentId" style="margin-top: 0.6rem">
+        {{ selectedScentFormula || 'No formula set for this scent yet.' }}
+      </p>
     </div>
 
     <template v-else>
