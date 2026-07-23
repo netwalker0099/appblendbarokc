@@ -9,6 +9,7 @@ use crate::error::AppError;
 use crate::models::customer::Customer;
 use crate::models::mix::{Mix, MixItem};
 use crate::models::order::Order;
+use crate::models::sync::SyncEntity;
 use crate::routes::mixes::MixDetail;
 use crate::AppState;
 
@@ -84,6 +85,9 @@ pub async fn update(
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound("customer not found".into()))?;
+
+    // Push name/consent changes downstream too.
+    crate::sync::enqueue(&state.db, SyncEntity::Contact, customer.id).await?;
 
     Ok(Json(customer))
 }

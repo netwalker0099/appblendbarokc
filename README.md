@@ -83,9 +83,26 @@ retries, so a double-tap or a flaky connection cannot create two orders.
 stack. It writes one customer and one order per run — see the header comment in that
 file for the exact command.
 
+## Squarespace sync
+
+Squarespace is a downstream sink; this app's Postgres is the source of truth. Intake
+enqueues contact + order pushes into a transactional `sync_outbox` (same transaction
+as the writes they mirror, so nothing is lost to a crash), and a background worker
+drains it with exponential-backoff retries, writing the returned Squarespace ids back
+onto the customer/order rows.
+
+The push backend is chosen at startup: with `SQUARESPACE_API_KEY` set it uses the
+live HTTP client, otherwise an **in-process mock** (the mode the box runs in today —
+no key yet). Wiring a real key in is the only change needed to go live; the HTTP
+client's request shapes are untested against Squarespace until then.
+
+- `GET /api/sync/status` — active backend, job counts by state, recent failures.
+- `POST /api/sync/retry` — requeue every failed job (the manual "try again now").
+
 ## Status
 
-Milestones 1–4 are done and validated live on the VPS: scaffold + TLS, schema,
-operator auth / CRUD / intake, and the operator UI described above. Squarespace sync
-(5), the webhook receiver and reconciliation (6), and `GET /api/customers/:id/reorder`
-(7) are not started — see `RESUME.md` for the current state and open questions.
+Milestones 1–5 and 7 are done and validated live on the VPS: scaffold + TLS, schema,
+operator auth / CRUD / intake, the operator UI, the reorder endpoint, and the
+Squarespace sync layer above (validated end-to-end against the mock). The webhook
+receiver and reconciliation (6) are not started — see `RESUME.md` for current state
+and open questions.

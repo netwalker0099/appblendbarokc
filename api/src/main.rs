@@ -3,15 +3,21 @@ mod db;
 mod error;
 mod models;
 mod routes;
+mod squarespace;
+mod sync;
 
 use axum::Json;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::net::SocketAddr;
+use std::sync::Arc;
+
+use crate::squarespace::Squarespace;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
+    pub squarespace: Arc<dyn Squarespace>,
 }
 
 #[tokio::main]
@@ -41,7 +47,14 @@ async fn main() {
         .expect("failed to connect to database or run migrations");
     tracing::info!("database connected and migrations applied");
 
-    let state = AppState { db };
+    let state = AppState {
+        db,
+        squarespace: squarespace::from_env(),
+    };
+
+    // Drain the Squarespace outbox in the background for the life of the process.
+    tokio::spawn(sync::run_worker(state.clone()));
+
     let app = routes::build_router(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));

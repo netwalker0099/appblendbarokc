@@ -1,6 +1,6 @@
 # Blend Bar — Resume Notes
 
-Last updated: 2026-07-23, after Milestone 7 + mix-builder editing.
+Last updated: 2026-07-23, after Milestone 5 (Squarespace sync against the mock).
 
 Read this first in a new session, then README.md for deploy mechanics.
 
@@ -19,11 +19,11 @@ This repo lives directly on the target VPS at `/opt/app` (hostname `app`, Ubuntu
 26.04). Docker, the Compose stack, and all validation in Milestones 1–3 have been
 run for real on this box, not in a separate sandbox.
 
-## Status: Milestones 1–4 + 7 done and validated live on this VPS
+## Status: Milestones 1–5 + 7 done and validated live on this VPS
 
-(Milestones 5 and 6 — the Squarespace sync layer and webhook receiver — are still
-not started; both are gated on a Squarespace API key nobody has yet. Milestone 7
-was pulled forward ahead of them because it needs nothing external.)
+(Milestone 6 — the webhook receiver + reconciliation — is not started. Milestone 5
+is built and validated **against the mock**; its live Squarespace HTTP path is
+untested because there's still no API key. See the Milestone 5 entry below.)
 
 - **Milestone 1 (scaffold):** Compose (`db`/`api`/`caddy`), multi-stage Dockerfiles,
   Caddyfile, `.env.example`, README. `docker compose up --build` brings up all three
@@ -62,6 +62,42 @@ was pulled forward ahead of them because it needs nothing external.)
   fan-out; `LookupView.select()` now makes a single `api.getReorder()` call.
   Validated live: 200 with items matching `GET /api/mixes/:id`, empty-mix
   customer returns `[]` (not an error), 404 on unknown id, 401 unauthenticated.
+- **Milestone 5 (Squarespace sync — mock-validated):** a transactional-outbox
+  push layer behind a mockable trait. Postgres stays source of truth; Squarespace
+  is a downstream sink.
+  - `api/src/squarespace/` — the `Squarespace` trait (`upsert_contact`,
+    `create_order`), a `MockSquarespace` (deterministic `mock_contact_<uuid>` /
+    `mock_order_<uuid>` ids, never fails), and `HttpSquarespace` (reqwest+rustls).
+    `from_env()` picks the HTTP client when `SQUARESPACE_API_KEY` is set, else the
+    mock — the box runs the **mock** today (no key). Selected once at startup into
+    `AppState.squarespace: Arc<dyn Squarespace>`.
+  - `api/migrations/0003_squarespace_sync_outbox.sql` — `sync_outbox` table.
+    Partial unique index `(entity_type, entity_id) where status='pending'` means a
+    repeat intake/patch bumps the existing pending row instead of duplicating; the
+    enqueue uses `on conflict … do update set next_attempt_at=now()`.
+  - `api/src/sync.rs` — `enqueue()` (transactional) + `run_worker()`: polls every
+    5s, drains due pending jobs, calls the backend, writes the id back onto the
+    customer/order, marks succeeded; on retryable error backs off exponentially
+    (10s,20s,40s…) up to `MAX_ATTEMPTS=6` then marks `failed`. Delivery is
+    at-least-once — `sync_order` skips create when `squarespace_order_id` is
+    already set, so a write-back crash can't double-create an order.
+  - Enqueue points: intake enqueues contact+order **inside the intake tx**;
+    `customers.rs::update` (PATCH) re-enqueues the contact so consent/name changes
+    propagate.
+  - `GET /api/sync/status` (backend + counts + recent failures) and
+    `POST /api/sync/retry` (requeue all failed) — `api/src/routes/sync.rs`.
+  - **Validated live against the mock:** intake → both jobs drained → `mock_*` ids
+    written back to customer & order; `/sync/status` showed `succeeded`; 3 rapid
+    PATCHes produced exactly 1 pending contact job (dedup); idempotent intake
+    replay added no second order outbox row; `/sync/retry` returned 0 with no
+    failures. The failure/backoff/`failed`-status path is code-only (the mock
+    can't fail) — exercise it once a real key exists, or by pointing at a bad key.
+  - **Untested & to check when a key lands:** `HttpSquarespace` endpoint paths
+    (`/profiles`, `/commerce/orders`), request bodies, and which response field
+    holds the created id — all marked with a warning comment in `http.rs`. Also
+    note rustls has two versions in the tree now (sqlx + reqwest); the reqwest
+    client is never even constructed under the mock, so no crypto-provider issue
+    shows up until the live path is used — verify it there.
 - **Mix-builder editing (same session):** each mix row is now an editable
   `<select class="name">` so an operator can swap an ingredient in place without
   losing its amount (`MixBuilder.vue::setIngredient` / `optionsFor`). A row's
@@ -156,30 +192,36 @@ was pulled forward ahead of them because it needs nothing external.)
 
 ## Not started
 
-- **Milestone 5** — Squarespace sync layer (Contacts + Orders APIs) behind a
-  mockable trait. Not started; `SQUARESPACE_API_KEY` in `.env` is blank.
-- **Milestone 6** — Webhook receiver + signature verification + reconciliation.
-  Not started.
+- **Milestone 6** — Webhook receiver + signature verification + reconciliation
+  (Squarespace order webhooks coming back *in*). Not started. Builds naturally on
+  the M5 outbox/sync-status plumbing.
 
 ## Open items nobody has answered yet
 
-- Squarespace API key not yet obtained or set.
+- **Squarespace API key still not obtained.** `SQUARESPACE_API_KEY` in `.env` is
+  blank, so the app runs the sync mock. Once set + `docker compose up -d`, the
+  live `HttpSquarespace` path takes over — but its request shapes are unverified
+  (see the M5 entry) and there are stale `mock_*` ids already written on existing
+  rows that a real sync won't overwrite for orders (contacts re-upsert fine).
 - Squarespace webhook signing-secret handling — will come up when Milestone 6
   starts; no decision made.
-- Whether to wipe or keep the fixture data described above.
+- Whether to wipe or keep the fixture data described above (now also includes M5
+  sync-test customers/orders carrying `mock_*` external ids).
 
 ## How to pick this back up
 
 1. `cd /opt/app && git status` — see whether anything's changed since this was
    written; commit first if not already done.
 2. `docker compose ps` — confirm the stack is still healthy.
-3. Skim this file and `README.md`. The next real milestone is **5** (Squarespace
-   sync) — but it's blocked on a Squarespace API key nobody has obtained yet, and
-   6 depends on 5. If the key still isn't available, the sync layer *can* be built
-   behind its mockable trait and validated against the mock, with live calls left
-   untested until the key lands — confirm that's the desired trade-off before
-   starting. Milestone 7 and the mix-builder editing added this session are done.
+3. Skim this file and `README.md`. The next real milestone is **6** (webhook
+   receiver + reconciliation). Before starting it, the webhook signing-secret
+   handling needs a decision (open item above). M6 consumes Squarespace order
+   webhooks coming back in and reconciles them against our orders — the M5
+   outbox/`/api/sync/status` plumbing is the foundation to build on.
+   Alternatively, if the Squarespace API key finally lands, the highest-value
+   quick task is verifying the untested `HttpSquarespace` live path.
 
-Note: validation this session left a deactivated ingredient `Vetiver (swap-test)`
-and several deactivated `verify`/`m7-validate`/`smoke` device tokens in the DB —
-part of the same fixture-cruft-vs-wipe question that's still open below.
+Note: device-token validation this session left deactivated `m5-validate`,
+`verify`, `m7-validate`, and `smoke` tokens plus a deactivated `Vetiver
+(swap-test)` ingredient in the DB, and M5 testing added a few sync-test customers/
+orders carrying `mock_*` ids — all part of the fixture-cruft-vs-wipe question above.

@@ -3,3 +3,4 @@ pub mod ingredient;
 pub mod mix;
 pub mod order;
 pub mod scent;
+pub mod sync;

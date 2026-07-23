@@ -11,6 +11,7 @@ use crate::models::mix::{Mix, MixItem};
 use crate::models::order::{BottleSize, Order, OrderStatus, OrderType};
 use crate::routes::ingredients::assert_active_ingredients;
 use crate::routes::mixes::{fetch_mix_detail, MixDetail, MixItemInput};
+use crate::models::sync::SyncEntity;
 use crate::routes::scents::assert_active_scent;
 use crate::AppState;
 
@@ -207,6 +208,11 @@ pub async fn intake(
     .bind(&idempotency_key)
     .fetch_one(&mut *tx)
     .await?;
+
+    // Enqueue the downstream Squarespace pushes in the same transaction as the
+    // writes they mirror, so a crash can't leave the DB updated but the sync lost.
+    crate::sync::enqueue(&mut *tx, SyncEntity::Contact, customer.id).await?;
+    crate::sync::enqueue(&mut *tx, SyncEntity::Order, order.id).await?;
 
     tx.commit().await?;
 

@@ -4,6 +4,7 @@ pub mod intake;
 pub mod mixes;
 pub mod orders;
 pub mod scents;
+pub mod sync;
 
 use axum::middleware;
 use axum::routing::{get, patch, post};
@@ -34,6 +35,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/orders", get(orders::list))
         .route("/api/orders/:id", get(orders::get).patch(orders::update))
         .route("/api/intake", post(intake::intake))
+        .route("/api/sync/status", get(sync::status))
+        .route("/api/sync/retry", post(sync::retry))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_operator_token,
