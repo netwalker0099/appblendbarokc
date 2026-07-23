@@ -4,12 +4,14 @@ Last updated: 2026-07-23, after Milestone 7 + mix-builder editing.
 
 Read this first in a new session, then README.md for deploy mechanics.
 
-## ⚠️ Committed locally, but there is still no remote
+## Git: committed and pushed to GitHub
 
-Work is committed on the local `master` branch (`git log` shows the milestone
-commits), but **no git remote is configured** — everything still lives only on
-this VPS's disk. If this box is lost, so is everything. Getting a remote set up
-and pushed is still an open item.
+`master` is committed and now pushed to **`git@github.com:netwalker0099/appblendbarokc.git`**
+(remote `origin`, tracking set up). Auth is an **SSH deploy key** generated on this
+VPS: private key `~/.ssh/blendbar_deploy`, pinned for github.com in `~/.ssh/config`
+(`IdentitiesOnly yes`), public half registered as a write-enabled deploy key on the
+repo. So `git push` from this box just works; there is no token stored anywhere.
+`git log origin/master` should match local. This is no longer VPS-disk-only.
 
 ## Where this lives
 
