@@ -22,6 +22,7 @@ pub fn build_router(state: AppState) -> Router {
             "/api/customers/:id/mixes",
             get(mixes::list_for_customer),
         )
+        .route("/api/customers/:id/reorder", get(customers::reorder))
         .route(
             "/api/ingredients",
             get(ingredients::list).post(ingredients::create),

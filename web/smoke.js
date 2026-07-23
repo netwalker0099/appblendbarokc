@@ -107,7 +107,12 @@ const log = (...a) => console.log(...a)
     await page.waitForSelector('.mix-row', { timeout: 15000 })
     const email = await page.$eval('#email', (e) => e.value)
     const prefill = await page.$$eval('.mix-row', (rs) =>
-      rs.map((r) => `${r.querySelector('.name').textContent.trim()}=${r.querySelector('input').value}`),
+      rs.map((r) => {
+        // .name is now a <select>; read the chosen option, not all of them.
+        const sel = r.querySelector('.name')
+        const name = sel.selectedOptions?.[0]?.textContent.trim() ?? sel.textContent.trim()
+        return `${name}=${r.querySelector('input').value}`
+      }),
     )
     if (!email || !prefill.length) fail.push('reorder did not prefill customer/mix')
     log(`REORDER: ok — ${email} ${JSON.stringify(prefill)}`)

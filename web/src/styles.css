@@ -294,12 +294,19 @@ button:focus-visible {
 
 .mix-row .name {
   flex: 2;
+  min-width: 0;
   font-weight: 600;
 }
 
 .mix-row .amount {
   flex: 1;
-  max-width: 110px;
+  max-width: 90px;
+}
+
+.mix-row .unit {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 /* The bare × needs more weight than the text-labelled header buttons. */

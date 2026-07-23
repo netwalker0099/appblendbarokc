@@ -60,6 +60,8 @@ export const api = {
     request(email ? `/customers?email=${encodeURIComponent(email)}` : '/customers'),
   getCustomer: (id) => request(`/customers/${id}`),
   listCustomerMixes: (id) => request(`/customers/${id}/mixes`),
+  // One round trip for the lookup view: customer + mixes-with-items + orders.
+  getReorder: (id) => request(`/customers/${id}/reorder`),
   getMix: (id) => request(`/mixes/${id}`),
   listOrders: (customerId) =>
     request(customerId ? `/orders?customer_id=${encodeURIComponent(customerId)}` : '/orders'),

@@ -1,15 +1,15 @@
 # Blend Bar — Resume Notes
 
-Last updated: 2026-07-22, after Milestone 3.
+Last updated: 2026-07-23, after Milestone 7 + mix-builder editing.
 
 Read this first in a new session, then README.md for deploy mechanics.
 
-## ⚠️ Nothing is committed to git yet
+## ⚠️ Committed locally, but there is still no remote
 
-`git init` was run in `/opt/app` but there has never been a commit. All work exists
-only as uncommitted files on this VPS's disk. If this box is lost, so is everything.
-First thing to do in a new session: review `git status`, commit, and push to a real
-remote if one doesn't exist yet.
+Work is committed on the local `master` branch (`git log` shows the milestone
+commits), but **no git remote is configured** — everything still lives only on
+this VPS's disk. If this box is lost, so is everything. Getting a remote set up
+and pushed is still an open item.
 
 ## Where this lives
 
@@ -17,7 +17,11 @@ This repo lives directly on the target VPS at `/opt/app` (hostname `app`, Ubuntu
 26.04). Docker, the Compose stack, and all validation in Milestones 1–3 have been
 run for real on this box, not in a separate sandbox.
 
-## Status: Milestones 1–4 done and validated live on this VPS
+## Status: Milestones 1–4 + 7 done and validated live on this VPS
+
+(Milestones 5 and 6 — the Squarespace sync layer and webhook receiver — are still
+not started; both are gated on a Squarespace API key nobody has yet. Milestone 7
+was pulled forward ahead of them because it needs nothing external.)
 
 - **Milestone 1 (scaffold):** Compose (`db`/`api`/`caddy`), multi-stage Dockerfiles,
   Caddyfile, `.env.example`, README. `docker compose up --build` brings up all three
@@ -48,6 +52,24 @@ run for real on this box, not in a separate sandbox.
   needed **no changes** — everything runs on the Milestone 3 endpoints. Validated
   by driving a real headless browser through pair → intake → submit → lookup →
   reorder against the live site; see `web/smoke.js`.
+- **Milestone 7 (reorder endpoint):** `GET /api/customers/:id/reorder`
+  (`api/src/routes/customers.rs::reorder`) returns `{ customer, mixes, orders }`
+  in one round trip — mixes come with their `items` already attached
+  (`MixDetail`, items bucketed in Rust from one `mix_id = any($1)` query, no N+1).
+  This replaced the lookup view's old customer → list-mixes → get-each-mix
+  fan-out; `LookupView.select()` now makes a single `api.getReorder()` call.
+  Validated live: 200 with items matching `GET /api/mixes/:id`, empty-mix
+  customer returns `[]` (not an error), 404 on unknown id, 401 unauthenticated.
+- **Mix-builder editing (same session):** each mix row is now an editable
+  `<select class="name">` so an operator can swap an ingredient in place without
+  losing its amount (`MixBuilder.vue::setIngredient` / `optionsFor`). A row's
+  options are every active ingredient minus the ones other rows already use, with
+  its own current ingredient always folded back in (even if since deactivated —
+  shown "(inactive)"). The row `:key` moved from `item.ingredient_id` to `index`
+  because the ingredient id can now change mid-edit. Amounts are labelled in **ml**
+  (a visible `.unit` span per row + a header note), which is what the API has
+  always stored. `smoke.js` was updated to read the row's selected option instead
+  of a static span's text.
 
 ## Decisions locked in — don't re-litigate these
 
@@ -136,8 +158,6 @@ run for real on this box, not in a separate sandbox.
   mockable trait. Not started; `SQUARESPACE_API_KEY` in `.env` is blank.
 - **Milestone 6** — Webhook receiver + signature verification + reconciliation.
   Not started.
-- **Milestone 7** — `GET /api/customers/:id/reorder`. This route does not exist
-  yet at all.
 
 ## Open items nobody has answered yet
 
@@ -151,7 +171,13 @@ run for real on this box, not in a separate sandbox.
 1. `cd /opt/app && git status` — see whether anything's changed since this was
    written; commit first if not already done.
 2. `docker compose ps` — confirm the stack is still healthy.
-3. Skim this file and `README.md`, then ask for the Milestone 5 plan to continue.
-   Milestone 7 (`GET /api/customers/:id/reorder`) is worth pulling forward if the
-   lookup view's three-call sequence (customer → mixes → each mix detail) starts
-   feeling slow on the stand's connection.
+3. Skim this file and `README.md`. The next real milestone is **5** (Squarespace
+   sync) — but it's blocked on a Squarespace API key nobody has obtained yet, and
+   6 depends on 5. If the key still isn't available, the sync layer *can* be built
+   behind its mockable trait and validated against the mock, with live calls left
+   untested until the key lands — confirm that's the desired trade-off before
+   starting. Milestone 7 and the mix-builder editing added this session are done.
+
+Note: validation this session left a deactivated ingredient `Vetiver (swap-test)`
+and several deactivated `verify`/`m7-validate`/`smoke` device tokens in the DB —
+part of the same fixture-cruft-vs-wipe question that's still open below.

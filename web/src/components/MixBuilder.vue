@@ -29,10 +29,32 @@ function nameFor(id) {
   return props.ingredients.find((i) => i.id === id)?.name ?? 'Unknown ingredient'
 }
 
+/// The ingredients a given row may switch to: every active ingredient except
+/// the ones other rows already use. Its own current ingredient stays in the
+/// list so the select shows and keeps the selection. A row's ingredient may
+/// have since been deactivated (an old mix reordered), so we fold it back in
+/// too, otherwise the select would silently drop to a different value.
+function optionsFor(index) {
+  const usedByOthers = new Set(
+    props.modelValue.filter((_, i) => i !== index).map((item) => item.ingredient_id),
+  )
+  const current = props.modelValue[index]?.ingredient_id
+  return props.ingredients.filter(
+    (i) => !usedByOthers.has(i.id) && (i.active || i.id === current),
+  )
+}
+
 function addIngredient() {
   if (!picking.value || atCap.value) return
   emit('update:modelValue', [...props.modelValue, { ingredient_id: picking.value, amount_ml: 1 }])
   picking.value = ''
+}
+
+function setIngredient(index, value) {
+  const next = props.modelValue.map((item, i) =>
+    i === index ? { ...item, ingredient_id: value } : item,
+  )
+  emit('update:modelValue', next)
 }
 
 function setAmount(index, value) {
@@ -54,12 +76,25 @@ function removeAt(index) {
   <div class="card">
     <h2>Mix builder — {{ modelValue.length }}/{{ MAX_INGREDIENTS }}</h2>
 
+    <p class="muted" style="margin-top: -0.4rem">
+      Amounts are in millilitres (ml), measured at the 3.4 oz base formula.
+    </p>
+
     <p class="muted" v-if="!activeIngredients.length">
       No active ingredients yet. Add some before building a mix.
     </p>
 
-    <div class="mix-row" v-for="(item, index) in modelValue" :key="item.ingredient_id">
-      <span class="name">{{ nameFor(item.ingredient_id) }}</span>
+    <div class="mix-row" v-for="(item, index) in modelValue" :key="index">
+      <select
+        class="name"
+        :value="item.ingredient_id"
+        :aria-label="`Ingredient ${index + 1}`"
+        @change="setIngredient(index, $event.target.value)"
+      >
+        <option v-for="option in optionsFor(index)" :key="option.id" :value="option.id">
+          {{ option.name }}{{ option.active ? '' : ' (inactive)' }}
+        </option>
+      </select>
       <input
         class="amount"
         type="number"
@@ -70,6 +105,7 @@ function removeAt(index) {
         :aria-label="`${nameFor(item.ingredient_id)} amount in millilitres`"
         @input="setAmount(index, $event.target.value)"
       />
+      <span class="unit" aria-hidden="true">ml</span>
       <button class="icon" type="button" :aria-label="`Remove ${nameFor(item.ingredient_id)}`" @click="removeAt(index)">
         ×
       </button>

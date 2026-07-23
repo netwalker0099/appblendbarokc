@@ -44,14 +44,12 @@ async function select(customer) {
   loadingDetail.value = true
   error.value = ''
   try {
-    const [customerMixes, customerOrders] = await Promise.all([
-      api.listCustomerMixes(customer.id),
-      api.listOrders(customer.id),
-    ])
-    orders.value = customerOrders
-    // The list endpoint returns mixes without their items; fetch each so the
-    // operator can see what they'd actually be reordering.
-    mixes.value = await Promise.all(customerMixes.map((mix) => api.getMix(mix.id)))
+    // Single call returns the customer's mixes (with items) and orders — no
+    // more per-mix fan-out over the stand's connection.
+    const detail = await api.getReorder(customer.id)
+    selected.value = detail.customer
+    mixes.value = detail.mixes
+    orders.value = detail.orders
   } catch (err) {
     error.value = err.message
   } finally {
