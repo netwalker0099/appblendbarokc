@@ -127,7 +127,17 @@ below. All planned milestones are now complete.)
     in `verify_signature`; and `HttpSquarespace::get_order`'s response field
     mapping. The dev secret `dev_webhook_secret_change_me` is set in `.env` (git-
     ignored) purely so the receiver is enabled for testing — replace it.
-- **Mix-builder editing (same session):** each mix row is now an editable
+- **Admin section (`/admin`, operator-authed):** catalog + integration UI.
+  `web/src/views/AdminView.vue` + reusable `components/CatalogManager.vue`. Adds
+  and activates/deactivates ingredients **and** scents from the UI (this is where
+  "add ingredient" now lives — the mix builder just consumes the active catalog).
+  Plus a Squarespace integration panel: push backend (mock/live), webhook-receiver
+  enabled state, sync job counts + "retry failed" (`POST /api/sync/retry`), and
+  recent inbound webhooks (`GET /api/webhooks/recent`). Uses existing CRUD; the
+  only API change was adding `webhook_receiver_enabled` to `/api/sync/status`.
+  Server-side secrets are deliberately not settable from the UI. No role model yet
+  — any paired device can reach `/admin` (user-level auth is still deferred).
+- **Mix-builder editing (earlier session):** each mix row is now an editable
   `<select class="name">` so an operator can swap an ingredient in place without
   losing its amount (`MixBuilder.vue::setIngredient` / `optionsFor`). A row's
   options are every active ingredient minus the ones other rows already use, with
