@@ -1,5 +1,5 @@
-{$DOMAIN} {
-	# Security headers applied to every response (app + API).
+# Shared security headers, applied to both vhosts.
+(security_headers) {
 	header {
 		# Force HTTPS for a year (this host is TLS-only via Caddy).
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -7,12 +7,17 @@
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "geolocation=(), microphone=(), camera=()"
-		# The SPA is fully self-hosted and same-origin; only inline *style
-		# attributes* are used (Vue :style bindings), hence style 'unsafe-inline'.
+		# style 'unsafe-inline' covers inline style attributes (Vue :style / static
+		# markup); scripts stay 'self' only.
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 		# Don't advertise the server software.
 		-Server
 	}
+}
+
+# Operator app (intake / lookup / admin).
+{$DOMAIN} {
+	import security_headers
 
 	handle /api/* {
 		reverse_proxy api:8080
@@ -21,6 +26,24 @@
 	handle {
 		root * /usr/share/caddy
 		try_files {path} /index.html
+		file_server
+	}
+
+	encode gzip
+}
+
+# Public customer-facing marketing site + (future) customer portal.
+# TLS issues automatically once the DNS record for this host resolves.
+sandbox.theblendbarokc.com {
+	import security_headers
+
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+
+	handle {
+		root * /usr/share/blendbar-site
+		try_files {path} {path}.html /index.html
 		file_server
 	}
 

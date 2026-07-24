@@ -260,6 +260,48 @@ below. All planned milestones are now complete.)
 - **Style hooks are class-based** (`.primary` / `.ghost` / `.icon`, not
   `button.primary`) so `RouterLink` anchors pick up the same styling as buttons.
 
+## Customer-facing site + portals (new initiative, started 2026-07-24)
+
+Goal: replace the Squarespace site with our own. New public site at
+**`sandbox.theblendbarokc.com`**; later promote/redirect `theblendbarokc.com` to it
+and keep sandbox as a staging env.
+
+**Decisions (owner-approved):**
+- **Stack:** built in our own stack — a static marketing site served by Caddy (NOT
+  WordPress; rejected for security/attack-surface). Shares the same API for the
+  future portal.
+- **Employee MFA:** support **both** TOTP (build first — no email dependency) and
+  email codes (added when email is ready). MFA required for all employee logins.
+- **Customer "repurchase":** staff-fulfilled reorder (customer submits, staff
+  complete/charge) — no online payment for now.
+
+**Phase 1 — public site (DONE, validated):** `site/` (index.html, portal.html,
+styles.css, assets/). Warm gold-on-cream luxury design matching the brand; the 3
+brand images were pulled from the old Squarespace site into `site/assets/` (served
+as `.webp`/`.jpeg` with correct types — needed because our `nosniff` header blocks
+mistyped content). New Caddy vhost `sandbox.theblendbarokc.com` in `Caddyfile`
+(headers factored into a `(security_headers)` snippet imported by both vhosts);
+`web/Dockerfile` copies `site/` to `/usr/share/blendbar-site`. "Customer Portal"
+button → `portal.html` (a "launching soon" stub); "Employee Login" → the operator
+app at `app.theblendbarokc.com`. Validated: images load, no JS errors, Caddy config
+valid, sandbox vhost routes (308→https), app.* unaffected.
+
+**Blockers:** DNS for `sandbox.theblendbarokc.com` not created yet (owner will) —
+TLS issues automatically once it resolves; until then Caddy retries ACME (harmless,
+app.* fine). Email not ready → customer magic-link + email-based MFA get stubbed
+until it is.
+
+**Phase 2 — employee auth (NEXT, big):** user accounts + RBAC (roles: `worker` →
+intake only; `admin` → RBAC/user mgmt, backups, integrations, everything in
+`/admin`) + required MFA (TOTP first). Sessions, user-management UI, migrate off the
+device-token model. Security-critical; do its own review.
+
+**Phase 3 — customer portal:** magic-link email login → session → match prior
+intakes by email → staff-fulfilled reorder. Email send stubbed until ready.
+
+**Phase 4 — promote to production:** cut `theblendbarokc.com` over to our site,
+redirect from Squarespace, keep sandbox for testing.
+
 ## Not started
 
 All seven planned milestones are complete. What remains is going live for real:
