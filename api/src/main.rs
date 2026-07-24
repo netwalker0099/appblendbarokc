@@ -1,4 +1,5 @@
 mod auth;
+mod customer_auth;
 mod db;
 mod employee_auth;
 mod error;

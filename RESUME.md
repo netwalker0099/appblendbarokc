@@ -343,8 +343,30 @@ until it is.
   when email is ready), forced temp-password change on first login (self-service
   `/account` change covers the need for now).
 
-**Phase 3 — customer portal:** magic-link email login → session → match prior
-intakes by email → staff-fulfilled reorder. Email send stubbed until ready.
+**Phase 3 — customer portal (in progress).**
+- **3a — backend (DONE, curl-validated).** Passwordless magic-link login for
+  customers, matched to `customers` rows by email. Migration 0008
+  (`customer_login_tokens` single-use+expiring, `customer_sessions`).
+  `customer_auth.rs` (own cookie `bb_customer`, 30-day session, reuses
+  `employee_auth` token/cookie helpers). `routes/customer_portal.rs` on the OPEN
+  router: `POST /api/customer/login` (generic response always — no email
+  enumeration; **email is STUBBED: the link is logged, not sent** — replace with a
+  real mailer when email is ready, and never return the token to the caller),
+  `POST /api/customer/verify` (consumes token → session cookie), `GET
+  /api/customer/me`, `GET /api/customer/history` (their mixes-with-items + the
+  set-perfume scents they've ordered), `POST /api/customer/reorder` (ownership-
+  checked; creates a `lead` order for staff to fulfil + enqueues sync),
+  `POST /api/customer/logout`. Magic link points at
+  `${CUSTOMER_SITE_URL:-https://sandbox.theblendbarokc.com}/portal/verify?token=`.
+  Validated: link generation/anti-enumeration, single-use token, session, history,
+  reorder (incl. 404 on someone else's mix, 400 on a never-ordered scent).
+- **3b — portal frontend (NEXT).** Replace the `site/portal.html` stub with the
+  real flow on the sandbox site (email entry → "check your email" → the
+  `/portal/verify` landing consumes the token → dashboard of saved blends with
+  one-tap reorder). Static + a little JS, calling `sandbox.theblendbarokc.com/api`.
+- **Blocked bit:** real email send (owner setting up) — until then the login link
+  only appears in the API logs, so the end-to-end customer flow can't be exercised
+  by a real user yet.
 
 **Phase 4 — promote to production:** cut `theblendbarokc.com` over to our site,
 redirect from Squarespace, keep sandbox for testing.

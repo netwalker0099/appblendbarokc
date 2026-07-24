@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod customer_portal;
 pub mod customers;
 pub mod employees;
 pub mod ingredients;
@@ -64,11 +65,22 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/auth/change-password", post(session::change_password))
         .route("/api/auth/me", get(session::me));
 
+    // Customer portal — cookie-based (its own customer session), so also outside
+    // the employee middleware.
+    let customer_flow = Router::new()
+        .route("/api/customer/login", post(customer_portal::request_link))
+        .route("/api/customer/verify", post(customer_portal::verify))
+        .route("/api/customer/me", get(customer_portal::me))
+        .route("/api/customer/logout", post(customer_portal::logout))
+        .route("/api/customer/history", get(customer_portal::history))
+        .route("/api/customer/reorder", post(customer_portal::reorder));
+
     Router::new()
         .route("/api/health", get(crate::health))
         // Public but HMAC-verified — Squarespace can't present an operator token.
         .route("/api/webhooks/squarespace", post(webhooks::receive))
         .merge(auth_flow)
+        .merge(customer_flow)
         .merge(authed)
         .with_state(state)
 }
