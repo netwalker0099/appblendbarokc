@@ -85,3 +85,28 @@ export const api = {
 export function verifyToken() {
   return request('/ingredients')
 }
+
+/// Fetches the full DB backup as a file. Not JSON, so it bypasses `request()` —
+/// returns the raw blob plus the server-provided filename for the download.
+export async function downloadBackup() {
+  const res = await fetch('/api/admin/backup', {
+    headers: deviceToken.value ? { Authorization: `Bearer ${deviceToken.value}` } : {},
+  })
+  if (res.status === 401) {
+    clearDeviceToken()
+    throw new ApiError('unauthorized', 401)
+  }
+  if (!res.ok) {
+    let message = `backup failed (${res.status})`
+    try {
+      message = (await res.json())?.error || message
+    } catch {
+      // non-JSON error body; keep the generic message
+    }
+    throw new ApiError(message, res.status)
+  }
+  const blob = await res.blob()
+  const disposition = res.headers.get('Content-Disposition') || ''
+  const match = disposition.match(/filename="?([^"]+)"?/)
+  return { blob, filename: match ? match[1] : `blendbar-backup-${Date.now()}.sql` }
+}

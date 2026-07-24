@@ -280,10 +280,25 @@ the API (8080) are Docker-internal only, never internet-exposed. Real TLS. All S
 is parameterized (`sqlx` binds). Device tokens are 256-bit random, stored SHA-256
 hashed. Errors don't leak internals. No Squarespace secrets reach the browser.
 
-**Done this session (the "fix now" tier):**
+**Done — "fix now" tier:**
 - Rotated the default Postgres password; strong random webhook secret; removed the
-  dead `OPERATOR_AUTH_SECRET`; deleted the world-readable plaintext PII backup that
-  was sitting at `/opt/`.
+  dead `OPERATOR_AUTH_SECRET`; deleted the world-readable plaintext PII backup.
+
+**Done — hardening tier:**
+- **Security headers** in `Caddyfile` (site-level `header` block, applies to app +
+  API): HSTS (1yr, includeSubDomains), `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, a CSP
+  (`default-src 'self'`; `style-src` allows `'unsafe-inline'` for Vue `:style`
+  attrs), and `-Server`. Verified the CSP does **not** break the SPA (0 console
+  violations on intake+admin).
+- **Backup download**: `GET /api/admin/backup` (`api/src/routes/admin.rs`, authed)
+  runs `pg_dump --no-owner --no-privileges` and streams the `.sql` as an
+  attachment; the api image now ships `postgresql-client-16` (PGDG, matches the
+  PG16 server) — see `api/Dockerfile`, tokio `process` feature. Admin UI has a
+  "Download database backup" button (`AdminView` + `downloadBackup()` in api.js,
+  blob download). **Restore-tested**: the dump reloaded cleanly into a scratch DB
+  with matching row counts. ⚠️ It's a full PII export gated only by device auth —
+  reinforces the admin-RBAC need below.
 
 **Chosen direction:** put **Cloudflare** in front (WAF + rate limiting + DDoS +
 hide origin IP) — not yet configured; it's the planned network layer. (VPN-only was
@@ -291,10 +306,11 @@ the alternative, not taken because customer access is likely later — see below
 
 **Still open / recommended, not yet done:**
 - Rate limiting (none today) — comes with Cloudflare, or `caddy-ratelimit`+fail2ban.
-- Security headers in Caddy (HSTS, X-Content-Type-Options, frame-ancestors CSP).
 - SSH hardening (key-only, fail2ban, restrict :22), host `ufw` default-deny.
-- Encrypted, off-box, automated DB backups + tested restore + retention (there is
-  **no backup routine** right now).
+- **Automated, scheduled, encrypted, off-box** DB backups + retention. The admin
+  button is a *manual pull* — good for ad-hoc/pre-change snapshots, but not a
+  substitute for an automated off-box routine (cron `pg_dump | age` → object
+  storage, tested restore).
 - Least-privilege DB role for the app (currently connects as the `blendbar` owner).
 - Auth model: tokens never expire/rotate, and **any paired device can reach
   `/admin`** (no roles). Add an admin role + token revocation before scaling

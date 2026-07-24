@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod customers;
 pub mod ingredients;
 pub mod intake;
@@ -39,6 +40,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/sync/status", get(sync::status))
         .route("/api/sync/retry", post(sync::retry))
         .route("/api/webhooks/recent", get(webhooks::recent))
+        .route("/api/admin/backup", get(admin::backup))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_operator_token,

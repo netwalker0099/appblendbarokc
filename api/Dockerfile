@@ -7,8 +7,14 @@ COPY api/migrations ./migrations
 RUN cargo build --release
 
 FROM debian:bookworm-slim
+# curl for the healthcheck; postgresql-client-16 (from PGDG, matching the PG16
+# server) provides pg_dump for the admin backup-download endpoint.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /etc/apt/trusted.gpg.d/pgdg.asc \
+    && echo "deb https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-16 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/target/release/blendbar-api /usr/local/bin/blendbar-api
 EXPOSE 8080

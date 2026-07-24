@@ -1,4 +1,19 @@
 {$DOMAIN} {
+	# Security headers applied to every response (app + API).
+	header {
+		# Force HTTPS for a year (this host is TLS-only via Caddy).
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		# The SPA is fully self-hosted and same-origin; only inline *style
+		# attributes* are used (Vue :style bindings), hence style 'unsafe-inline'.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+		# Don't advertise the server software.
+		-Server
+	}
+
 	handle /api/* {
 		reverse_proxy api:8080
 	}

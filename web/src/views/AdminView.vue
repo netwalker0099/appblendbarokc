@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router'
 import CatalogManager from '../components/CatalogManager.vue'
 import ScentManager from '../components/ScentManager.vue'
 import { INGREDIENT_TYPES } from '../lib/bottle.js'
-import { api } from '../lib/api.js'
+import { api, downloadBackup } from '../lib/api.js'
 
 const router = useRouter()
 
@@ -122,6 +122,27 @@ function flash(msg) {
   flashTimer = setTimeout(() => (notice.value = ''), 4000)
 }
 
+const backingUp = ref(false)
+async function backup() {
+  backingUp.value = true
+  try {
+    const { blob, filename } = await downloadBackup()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    flash(`Downloaded ${filename}.`)
+  } catch (err) {
+    handle(err)
+  } finally {
+    backingUp.value = false
+  }
+}
+
 const failedCount = computed(() => sync.value?.counts?.failed ?? 0)
 
 function formatTime(value) {
@@ -213,6 +234,18 @@ function formatTime(value) {
           {{ event.status }}
         </span>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Backup</h2>
+      <p class="muted">
+        Download a full database backup (SQL) — restorable into a fresh Postgres if
+        this box is ever lost. It contains all customer data, so store it somewhere
+        safe.
+      </p>
+      <button class="ghost" type="button" :disabled="backingUp" @click="backup">
+        {{ backingUp ? 'Preparing…' : 'Download database backup' }}
+      </button>
     </div>
   </template>
 </template>
