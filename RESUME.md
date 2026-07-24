@@ -406,12 +406,19 @@ negatives ⇒ 400). Admin `ScentManager` gained 3 price inputs in the scent edit
 and a price summary. Validated (curl + browser: set/clear/negative/omit; UI saves
 72/40/22).
 
-**Step 2 — share links + QR + public pages (NEXT, unblocked).** Serialized public
-URL per scent (e.g. `/s/<id>`) + QR; a public scent page (name, ingredient names
-w/o amounts, per-size prices, Buy CTA); a public read-only scent view endpoint
-(names, no amounts); Share affordance in portal/admin. Also decide custom-blend
-pricing (bespoke blends need a price to be purchasable — likely a global
-custom-blend price per size, TBD).
+**Step 2 — share links + QR + public pages (DONE, validated).** `routes/public.rs`
+(open router): `GET /api/public/scent/:id` → `{name, notes:[ingredient names],
+price_*}` for **active** scents only (404 otherwise) — **names only, never
+amounts/items**; `GET /api/public/scent/:id/qr` → SVG QR of the share URL (`qrcode`
+crate). Sandbox site: `site/share.html` + `share.js` served for `/s/*` (Caddy
+`handle /s/* { rewrite * /share.html }`; share.js reads the id from the path) —
+public scent page with monogram, notes chips, per-size price radios, and a Buy CTA
+(placeholder → "checkout launching soon" until Step 3). Portal scent cards gained a
+**Share** button → panel with the `/s/<id>` link (copy) + the QR `<img>`. Validated
+(curl: names-only/no-amount-leak/404/QR-svg + `/s/<id>` serves the page; browser:
+public page renders name/notes/prices, QR loads, Buy shows placeholder). **Custom-
+blend sharing/pricing deferred** — scents only for now (bespoke blends still need a
+global per-size price decision before they can be shared/bought).
 
 **Step 3 — Square Hosted Checkout (BLOCKED on Square sandbox credentials).** Needs
 from owner: Square **Application ID**, **Sandbox Access Token**, **Location ID**.

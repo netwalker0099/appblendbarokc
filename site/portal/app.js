@@ -68,12 +68,28 @@
 
   function blendCard(type, id, name) {
     const opts = SIZES.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')
+    // Only house scents have public share pages (with prices); custom blends don't.
+    const shareUrl = location.origin + '/s/' + id
+    const shareBtn = type === 'set_perfume' ? `<button class="btn ghost" data-share>Share</button>` : ''
+    const panel =
+      type === 'set_perfume'
+        ? `<div class="share-panel" hidden>
+        <p class="muted">Share this scent — a friend can view and buy it from this link.</p>
+        <div class="share-row">
+          <input class="portal-input share-link" readonly value="${esc(shareUrl)}" />
+          <button class="btn ghost" data-copy>Copy</button>
+        </div>
+        <img class="share-qr" src="/api/public/scent/${esc(id)}/qr" alt="Scan to open this scent" width="180" height="180" />
+      </div>`
+        : ''
     return `<div class="blend">
       <div class="blend-name">${esc(name)}</div>
       <div class="blend-controls">
         <select class="blend-size portal-input" aria-label="Bottle size">${opts}</select>
         <button class="btn solid" data-reorder data-type="${type}" data-id="${esc(id)}">Reorder</button>
+        ${shareBtn}
       </div>
+      ${panel}
     </div>`
   }
 
@@ -101,6 +117,24 @@
       ${empty ? `<p class="muted">No saved blends yet — visit us at the bar to craft your first.</p>` : ''}`
     document.getElementById('logoutBtn').addEventListener('click', onLogout)
     view.querySelectorAll('[data-reorder]').forEach((b) => b.addEventListener('click', onReorder))
+    view.querySelectorAll('[data-share]').forEach((b) =>
+      b.addEventListener('click', (e) => {
+        const panel = e.currentTarget.closest('.blend').querySelector('.share-panel')
+        if (panel) panel.hidden = !panel.hidden
+      }),
+    )
+    view.querySelectorAll('[data-copy]').forEach((b) =>
+      b.addEventListener('click', async (e) => {
+        const link = e.currentTarget.closest('.share-panel').querySelector('.share-link').value
+        try {
+          await navigator.clipboard.writeText(link)
+          e.currentTarget.textContent = 'Copied!'
+          setTimeout(() => (e.currentTarget.textContent = 'Copy'), 1500)
+        } catch {
+          /* clipboard unavailable */
+        }
+      }),
+    )
   }
 
   async function onReorder(e) {

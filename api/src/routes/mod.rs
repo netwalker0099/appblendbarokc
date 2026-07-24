@@ -6,6 +6,7 @@ pub mod ingredients;
 pub mod intake;
 pub mod mixes;
 pub mod orders;
+pub mod public;
 pub mod scents;
 pub mod session;
 pub mod sync;
@@ -75,12 +76,18 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/customer/history", get(customer_portal::history))
         .route("/api/customer/reorder", post(customer_portal::reorder));
 
+    // Public share targets (no auth): scent view (names, no amounts) + QR.
+    let public_routes = Router::new()
+        .route("/api/public/scent/:id", get(public::scent))
+        .route("/api/public/scent/:id/qr", get(public::scent_qr));
+
     Router::new()
         .route("/api/health", get(crate::health))
         // Public but HMAC-verified — Squarespace can't present an operator token.
         .route("/api/webhooks/squarespace", post(webhooks::receive))
         .merge(auth_flow)
         .merge(customer_flow)
+        .merge(public_routes)
         .merge(authed)
         .with_state(state)
 }

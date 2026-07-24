@@ -41,6 +41,14 @@ sandbox.theblendbarokc.com {
 		reverse_proxy api:8080
 	}
 
+	# Shareable scent links: /s/<id> serves the public scent page (share.js reads
+	# the id from the path).
+	handle /s/* {
+		root * /usr/share/blendbar-site
+		rewrite * /share.html
+		file_server
+	}
+
 	handle {
 		root * /usr/share/blendbar-site
 		# {path}/index.html serves /portal (portal/index.html); {path}.html serves
