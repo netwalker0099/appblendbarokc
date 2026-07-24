@@ -107,12 +107,12 @@ async function toggleScent(item) {
     handle(err)
   }
 }
-async function saveScentFormula(scent, items) {
+async function saveScentFormula(scent, items, prices) {
   try {
     const payload = items.map((i) => ({ ingredient_id: i.ingredient_id, amount_ml: Number(i.amount_ml) }))
-    const updated = await api.updateScent(scent.id, { items: payload })
+    const updated = await api.updateScent(scent.id, { items: payload, prices })
     scents.value = scents.value.map((s) => (s.id === updated.id ? updated : s))
-    flash(`Saved formula for “${scent.name}”.`)
+    flash(`Saved “${scent.name}”.`)
   } catch (err) {
     handle(err)
   }

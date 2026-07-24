@@ -5,7 +5,7 @@ import { formatMl } from '../lib/bottle.js'
 import MixBuilder from './MixBuilder.vue'
 
 const props = defineProps({
-  scents: { type: Array, required: true }, // each: { id, name, active, items }
+  scents: { type: Array, required: true }, // each: { id, name, active, items, price_* }
   ingredients: { type: Array, required: true },
 })
 
@@ -14,13 +14,12 @@ const emit = defineEmits(['add', 'toggle', 'save'])
 const draft = ref('')
 const adding = ref(false)
 
-// Per-scent editable copies of the formula, and which rows are expanded.
+// Per-scent editable copies of the formula + prices, and which rows are expanded.
 const forms = reactive({})
+const prices = reactive({})
 const expanded = reactive({})
 const saving = reactive({})
 
-// Rebuild the working copies whenever the scents (with items) change — e.g. after
-// a save round-trips the persisted formula back.
 watch(
   () => props.scents,
   (scents) => {
@@ -29,6 +28,11 @@ watch(
         ingredient_id: i.ingredient_id,
         amount_ml: Number(i.amount_ml),
       }))
+      prices[scent.id] = {
+        oz3_4: scent.price_oz3_4 ?? '',
+        oz1_7: scent.price_oz1_7 ?? '',
+        roller: scent.price_roller ?? '',
+      }
     }
   },
   { immediate: true, deep: true },
@@ -47,6 +51,19 @@ function summarize(scent) {
   return scent.items.map((i) => `${ingredientName(i.ingredient_id)} ${formatMl(i.amount_ml)}ml`).join(' · ')
 }
 
+function priceSummary(scent) {
+  const parts = [
+    ['3.4oz', scent.price_oz3_4],
+    ['1.7oz', scent.price_oz1_7],
+    ['roller', scent.price_roller],
+  ]
+    .filter(([, v]) => v != null)
+    .map(([label, v]) => `${label} $${v}`)
+  return parts.length ? parts.join(' · ') : 'No prices set'
+}
+
+const priceVal = (v) => (v === '' || v === null ? null : Number(v))
+
 async function add() {
   const name = draft.value.trim()
   if (!name || adding.value) return
@@ -62,7 +79,12 @@ async function add() {
 async function save(scent) {
   saving[scent.id] = true
   try {
-    await emit('save', scent, forms[scent.id])
+    const p = prices[scent.id]
+    await emit('save', scent, forms[scent.id], {
+      oz3_4: priceVal(p.oz3_4),
+      oz1_7: priceVal(p.oz1_7),
+      roller: priceVal(p.roller),
+    })
   } finally {
     saving[scent.id] = false
   }
@@ -95,10 +117,11 @@ async function save(scent) {
         <span class="grow">
           <strong>{{ scent.name }}</strong>
           <span class="muted">{{ summarize(scent) }}</span>
+          <span class="muted">{{ priceSummary(scent) }}</span>
         </span>
         <span class="badge" v-if="!scent.active">inactive</span>
         <button class="ghost" type="button" style="flex: none" @click="expanded[scent.id] = !expanded[scent.id]">
-          {{ expanded[scent.id] ? 'Close' : 'Formula' }}
+          {{ expanded[scent.id] ? 'Close' : 'Edit' }}
         </button>
         <button class="ghost" type="button" style="flex: none" @click="emit('toggle', scent)">
           {{ scent.active ? 'Deactivate' : 'Activate' }}
@@ -107,8 +130,27 @@ async function save(scent) {
 
       <template v-if="expanded[scent.id]">
         <MixBuilder v-model="forms[scent.id]" :ingredients="ingredients" />
+
+        <div class="card" style="margin: 0.6rem 0">
+          <h2>Prices ($)</h2>
+          <div class="row">
+            <div>
+              <label>3.4 oz</label>
+              <input type="number" inputmode="decimal" min="0" step="0.01" v-model="prices[scent.id].oz3_4" />
+            </div>
+            <div>
+              <label>1.7 oz</label>
+              <input type="number" inputmode="decimal" min="0" step="0.01" v-model="prices[scent.id].oz1_7" />
+            </div>
+            <div>
+              <label>Roller</label>
+              <input type="number" inputmode="decimal" min="0" step="0.01" v-model="prices[scent.id].roller" />
+            </div>
+          </div>
+        </div>
+
         <button class="ghost" type="button" :disabled="saving[scent.id]" @click="save(scent)">
-          {{ saving[scent.id] ? 'Saving…' : 'Save formula' }}
+          {{ saving[scent.id] ? 'Saving…' : 'Save formula & prices' }}
         </button>
       </template>
     </div>

@@ -383,6 +383,42 @@ until it is.
 **Phase 4 — promote to production:** cut `theblendbarokc.com` over to our site,
 redirect from Squarespace, keep sandbox for testing.
 
+## Milestone 8: Shareable scents + Square checkout (in progress, 2026-07-24)
+
+Owner wants shareable scent links + QR so a customer can send a scent to a friend
+who can buy it online. **Owner-approved decisions:**
+- **Payments via Square, PCI-minimal:** use **Square Hosted Checkout** (create a
+  payment link server-side → redirect the buyer to Square's hosted page → payment
+  webhook back). Card data never touches our server or page ⇒ **PCI SAQ-A**. (Not
+  Xero — it invoices/integrates Stripe, doesn't process cards.) Web Payments SDK is
+  the in-page alternative if a seamless field is wanted later (SAQ-A-EP).
+- **Per-size prices per scent** (3.4oz / 1.7oz / roller), set in Admin. ✔ done.
+- **Public visibility:** share/public pages show a scent's **ingredient NAMES only**
+  (the notes) + prices — **never the ml amounts** (formula stays employee-only).
+- **Shared custom blends:** view-and-buy only, **not editable**, **crafted by staff
+  at an event** (a purchased blend is a fulfilment task, not shipped).
+
+**Step 1 — per-size pricing (DONE, validated).** Migration 0009 adds
+`price_oz3_4/oz1_7/roller` (numeric, nullable) to `scents`; `Scent` model + the
+`Scent` serialization carry them. `PATCH /api/scents/:id` takes `prices:{oz3_4,
+oz1_7,roller}` (present ⇒ set all three, a null clears one; omitted ⇒ unchanged;
+negatives ⇒ 400). Admin `ScentManager` gained 3 price inputs in the scent editor
+and a price summary. Validated (curl + browser: set/clear/negative/omit; UI saves
+72/40/22).
+
+**Step 2 — share links + QR + public pages (NEXT, unblocked).** Serialized public
+URL per scent (e.g. `/s/<id>`) + QR; a public scent page (name, ingredient names
+w/o amounts, per-size prices, Buy CTA); a public read-only scent view endpoint
+(names, no amounts); Share affordance in portal/admin. Also decide custom-blend
+pricing (bespoke blends need a price to be purchasable — likely a global
+custom-blend price per size, TBD).
+
+**Step 3 — Square Hosted Checkout (BLOCKED on Square sandbox credentials).** Needs
+from owner: Square **Application ID**, **Sandbox Access Token**, **Location ID**.
+Then: create-payment-link endpoint → redirect → Square webhook receiver (signature-
+verified, like the Squarespace one) → mark order `paid` + flag staff/event
+fulfilment. Once in, the existing portal **Reorder** can use the same checkout.
+
 ## Not started
 
 All seven planned milestones are complete. What remains is going live for real:
