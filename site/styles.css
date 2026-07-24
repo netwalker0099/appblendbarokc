@@ -41,6 +41,7 @@ body {
 
 img {
   max-width: 100%;
+  height: auto; /* always scale proportionally, ignoring the width/height attrs */
   display: block;
 }
 
