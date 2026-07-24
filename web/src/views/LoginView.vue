@@ -148,10 +148,14 @@ async function submitCode() {
   margin: 2rem auto 0;
 }
 .auth-title {
+  font-family: var(--serif);
+  font-weight: 400;
+  text-transform: uppercase;
   text-align: center;
-  font-size: 1.6rem;
-  letter-spacing: 0.06em;
-  margin: 0 0 0.2rem;
+  font-size: 1.4rem;
+  letter-spacing: 0.2em;
+  color: var(--ink);
+  margin: 0 0 0.3rem;
 }
 .auth-sub {
   text-align: center;

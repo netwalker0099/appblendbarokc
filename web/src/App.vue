@@ -13,7 +13,10 @@ async function onLogout() {
 
 <template>
   <header class="app-header">
-    <h1>Blend Bar</h1>
+    <RouterLink class="brand" :to="currentUser ? { name: 'intake' } : { name: 'login' }">
+      <img class="brand-mark" src="/monogram.webp" alt="" />
+      <h1>The Blend Bar</h1>
+    </RouterLink>
     <nav class="app-nav" v-if="currentUser">
       <RouterLink :to="{ name: 'intake' }">Intake</RouterLink>
       <RouterLink :to="{ name: 'lookup' }">Lookup</RouterLink>
@@ -33,7 +36,9 @@ async function onLogout() {
 <style scoped>
 .who {
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  letter-spacing: normal;
+  text-transform: none;
   max-width: 12rem;
   overflow: hidden;
   text-overflow: ellipsis;
