@@ -323,10 +323,25 @@ until it is.
   matrix (worker 403s on all admin routes, admin 200s, no-session 401) + a browser
   run (unauth→login, admin enroll→verify→full nav→/admin, logout, worker
   login→MFA→no Admin nav→/admin redirects to intake).
-- **2c — user management UI (admin):** list/create employees (email+role → temp
-  password), deactivate, reset password, change role.
-- Not yet done: login rate-limiting/lockout (Cloudflare later), email-code MFA
-  (second method, when email is ready), forced temp-password change on first login.
+- **2c — user management + password change (DONE, validated).** `routes/employees.rs`
+  (all admin-only): `GET/POST /api/employees` (create returns a one-time
+  `temp_password`), `PATCH /api/employees/:id` (role/active — in a tx that rolls
+  back if it would leave zero active admins: the **last-admin guard**),
+  `POST …/reset-password` (new temp + kills that employee's sessions),
+  `POST …/reset-mfa` (clears TOTP → re-enroll on next login; lost-device recovery).
+  `POST /api/auth/change-password` in `session.rs` (self-service: needs current
+  password, ≥8 chars, keeps the current session, kills others). Frontend:
+  `components/TeamManager.vue` in the admin page (roster, create, role select,
+  reset pw/MFA, deactivate, temp-password banner); `views/AccountView.vue` at
+  `/account` (change password), linked from the header email. Validated via curl
+  (create/list/dupe-409/worker-403/role/active/resets/change-password) + a browser
+  run (create employee → temp-password banner; account form). The last-admin guard
+  is code-reviewed only — it can't fire in a live DB that always has ≥1 admin
+  (`rtaylor@theblendbarokc.com`).
+- **Phase 2 is complete.** Not yet done (deferred, noted): login
+  rate-limiting/lockout (comes with Cloudflare), email-code MFA (second method,
+  when email is ready), forced temp-password change on first login (self-service
+  `/account` change covers the need for now).
 
 **Phase 3 — customer portal:** magic-link email login → session → match prior
 intakes by email → staff-fulfilled reorder. Email send stubbed until ready.

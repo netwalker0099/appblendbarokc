@@ -18,7 +18,9 @@ async function onLogout() {
       <RouterLink :to="{ name: 'intake' }">Intake</RouterLink>
       <RouterLink :to="{ name: 'lookup' }">Lookup</RouterLink>
       <RouterLink v-if="isAdmin" :to="{ name: 'admin' }">Admin</RouterLink>
-      <span class="who" :title="currentUser.email">{{ currentUser.email }}</span>
+      <RouterLink class="who" :to="{ name: 'account' }" :title="`${currentUser.email} — account`">
+        {{ currentUser.email }}
+      </RouterLink>
       <button class="icon" type="button" @click="onLogout">Log out</button>
     </nav>
   </header>

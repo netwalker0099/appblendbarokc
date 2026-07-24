@@ -158,6 +158,51 @@ pub async fn logout(
     Ok(ea::json_with_cookie(ea::clear_cookie(), json!({ "status": "ok" })))
 }
 
+#[derive(Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+/// Self-service password change for the signed-in employee. Requires the current
+/// password; other sessions are invalidated but the current one is kept.
+pub async fn change_password(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ChangePasswordRequest>,
+) -> Result<Json<Value>, AppError> {
+    let (session, employee) = ea::load_session(&state.db, &headers)
+        .await
+        .ok_or(AppError::Unauthorized)?;
+    if session.mfa_pending {
+        return Err(AppError::Unauthorized);
+    }
+    if !ea::verify_password(&body.current_password, &employee.password_hash) {
+        return Err(AppError::Unauthorized);
+    }
+    if body.new_password.len() < 8 {
+        return Err(AppError::BadRequest(
+            "new password must be at least 8 characters".into(),
+        ));
+    }
+
+    let hash = ea::hash_password(&body.new_password)
+        .map_err(|e| AppError::Internal(format!("password hash failed: {e}")))?;
+    sqlx::query("update employees set password_hash = $1 where id = $2")
+        .bind(&hash)
+        .bind(employee.id)
+        .execute(&state.db)
+        .await?;
+    // Sign out everywhere except here.
+    sqlx::query("delete from employee_sessions where employee_id = $1 and id <> $2")
+        .bind(employee.id)
+        .bind(session.id)
+        .execute(&state.db)
+        .await?;
+
+    Ok(Json(json!({ "status": "ok" })))
+}
+
 /// Who am I — the frontend calls this on load to route by auth state + role.
 pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, AppError> {
     let (session, employee) = ea::load_session(&state.db, &headers)

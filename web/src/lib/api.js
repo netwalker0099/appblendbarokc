@@ -45,6 +45,15 @@ export const api = {
   mfaVerify: (code) => request('/auth/mfa/verify', { method: 'POST', body: { code } }),
   logout: () => request('/auth/logout', { method: 'POST' }),
   me: () => request('/auth/me'),
+  changePassword: (current_password, new_password) =>
+    request('/auth/change-password', { method: 'POST', body: { current_password, new_password } }),
+
+  // --- employee/user management (admin) ---
+  listEmployees: () => request('/employees'),
+  createEmployee: (email, role) => request('/employees', { method: 'POST', body: { email, role } }),
+  updateEmployee: (id, patch) => request(`/employees/${id}`, { method: 'PATCH', body: patch }),
+  resetEmployeePassword: (id) => request(`/employees/${id}/reset-password`, { method: 'POST' }),
+  resetEmployeeMfa: (id) => request(`/employees/${id}/reset-mfa`, { method: 'POST' }),
 
   // --- catalog / operations ---
   listIngredients: () => request('/ingredients'),

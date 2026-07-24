@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { currentUser, loadUser } from './lib/auth.js'
+import AccountView from './views/AccountView.vue'
 import AdminView from './views/AdminView.vue'
 import IntakeView from './views/IntakeView.vue'
 import LoginView from './views/LoginView.vue'
@@ -11,6 +12,7 @@ const routes = [
   { path: '/intake', name: 'intake', component: IntakeView },
   { path: '/lookup', name: 'lookup', component: LookupView },
   { path: '/admin', name: 'admin', component: AdminView, meta: { admin: true } },
+  { path: '/account', name: 'account', component: AccountView },
   { path: '/login', name: 'login', component: LoginView },
 ]
 

@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod customers;
+pub mod employees;
 pub mod ingredients;
 pub mod intake;
 pub mod mixes;
@@ -42,6 +43,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/sync/retry", post(sync::retry))
         .route("/api/webhooks/recent", get(webhooks::recent))
         .route("/api/admin/backup", get(admin::backup))
+        .route("/api/employees", get(employees::list).post(employees::create))
+        .route("/api/employees/:id", patch(employees::update))
+        .route("/api/employees/:id/reset-password", post(employees::reset_password))
+        .route("/api/employees/:id/reset-mfa", post(employees::reset_mfa))
         // Every operator route requires a full (MFA-complete) employee session;
         // admin-only routes additionally use the `AdminEmployee` extractor.
         .route_layer(middleware::from_fn_with_state(
@@ -56,6 +61,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/auth/mfa/enroll", post(session::mfa_enroll))
         .route("/api/auth/mfa/verify", post(session::mfa_verify))
         .route("/api/auth/logout", post(session::logout))
+        .route("/api/auth/change-password", post(session::change_password))
         .route("/api/auth/me", get(session::me));
 
     Router::new()

@@ -4,13 +4,16 @@ import { useRouter } from 'vue-router'
 
 import CatalogManager from '../components/CatalogManager.vue'
 import ScentManager from '../components/ScentManager.vue'
+import TeamManager from '../components/TeamManager.vue'
 import { INGREDIENT_TYPES } from '../lib/bottle.js'
 import { api, downloadBackup } from '../lib/api.js'
+import { currentUser } from '../lib/auth.js'
 
 const router = useRouter()
 
 const ingredients = ref([])
 const scents = ref([])
+const employees = ref([])
 const sync = ref(null)
 const webhooks = ref([])
 
@@ -24,14 +27,16 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [ing, sc, st, wh] = await Promise.all([
+    const [ing, sc, emp, st, wh] = await Promise.all([
       api.listIngredients(),
       api.listScents(),
+      api.listEmployees(),
       api.getSyncStatus(),
       api.listWebhooks(),
     ])
     ingredients.value = ing
     scents.value = sc
+    employees.value = emp
     sync.value = st
     webhooks.value = wh
   } catch (err) {
@@ -44,6 +49,14 @@ async function load() {
 function handle(err) {
   error.value = err.message
   if (err.status === 401) router.push({ name: 'login' })
+}
+
+async function reloadTeam() {
+  try {
+    employees.value = await api.listEmployees()
+  } catch (err) {
+    handle(err)
+  }
 }
 
 async function refreshIntegration() {
@@ -172,6 +185,12 @@ function formatTime(value) {
       @add="addScent"
       @toggle="toggleScent"
       @save="saveScentFormula"
+    />
+
+    <TeamManager
+      :employees="employees"
+      :current-email="currentUser?.email || ''"
+      @changed="reloadTeam"
     />
 
     <div class="card">
