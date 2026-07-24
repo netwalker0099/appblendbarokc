@@ -220,12 +220,14 @@ below. All planned milestones are now complete.)
 - `docker compose up -d` stack is up: `db`, `api`, `caddy` — check with
   `docker compose ps`; restart policy is `unless-stopped` so a VPS reboot should
   self-heal, but verify after any long gap.
-- `.env` exists on disk, copied from `.env.example` with placeholder/dev values
-  (`POSTGRES_PASSWORD=changeme`, etc.) — **not production-ready secrets.**
-- `OPERATOR_AUTH_SECRET` is still wired into `docker-compose.yml` and
-  `.env.example` but is **dead** — grep confirms no Rust code reads it. It predates
-  the per-device-token design landing. Safe to delete from both files whenever
-  convenient; harmless to leave.
+- **Secrets hardened 2026-07-24** (`.env`, git-ignored): `POSTGRES_PASSWORD` is now
+  a 24-byte random hex (rotated live via `ALTER USER blendbar` + matching
+  `DATABASE_URL`, not the old `changeme`), and `SQUARESPACE_WEBHOOK_SECRET` is a
+  32-byte random hex (was the `dev_…` placeholder). The webhook secret still must
+  be set to match whatever signing secret Squarespace generates when the
+  subscription is actually registered. `SQUARESPACE_API_KEY` remains blank (mock).
+- `OPERATOR_AUTH_SECRET` (dead, unread by any code) was **removed** from `.env`,
+  `.env.example`, and `docker-compose.yml`.
 - **The DB was wiped clean on 2026-07-24** to start entering real data. All
   business tables (`customers`, `orders`, `mixes`, `mix_items`, `scents`,
   `scent_items`, `ingredients`, `customer_scent_preferences`, `webhook_events`,
@@ -267,6 +269,42 @@ All seven planned milestones are complete. What remains is going live for real:
 - Obtain the real webhook **signing secret** for the subscription → replace the
   dev value in `.env`; verify the signature header/encoding and `get_order`
   mapping (see M6 entry). Register the webhook subscription in Squarespace.
+
+## Security posture (reviewed 2026-07-24)
+
+The app is public on 80/443 behind Caddy. A security review was done; findings and
+status:
+
+**Already good:** only 22/80/443 listen on public interfaces — Postgres (5432) and
+the API (8080) are Docker-internal only, never internet-exposed. Real TLS. All SQL
+is parameterized (`sqlx` binds). Device tokens are 256-bit random, stored SHA-256
+hashed. Errors don't leak internals. No Squarespace secrets reach the browser.
+
+**Done this session (the "fix now" tier):**
+- Rotated the default Postgres password; strong random webhook secret; removed the
+  dead `OPERATOR_AUTH_SECRET`; deleted the world-readable plaintext PII backup that
+  was sitting at `/opt/`.
+
+**Chosen direction:** put **Cloudflare** in front (WAF + rate limiting + DDoS +
+hide origin IP) — not yet configured; it's the planned network layer. (VPN-only was
+the alternative, not taken because customer access is likely later — see below.)
+
+**Still open / recommended, not yet done:**
+- Rate limiting (none today) — comes with Cloudflare, or `caddy-ratelimit`+fail2ban.
+- Security headers in Caddy (HSTS, X-Content-Type-Options, frame-ancestors CSP).
+- SSH hardening (key-only, fail2ban, restrict :22), host `ufw` default-deny.
+- Encrypted, off-box, automated DB backups + tested restore + retention (there is
+  **no backup routine** right now).
+- Least-privilege DB role for the app (currently connects as the `blendbar` owner).
+- Auth model: tokens never expire/rotate, and **any paired device can reach
+  `/admin`** (no roles). Add an admin role + token revocation before scaling
+  devices — and definitely before the customer-facing plan below.
+
+**Future intent:** the owner may open this to **customers for online scent
+reordering**. That's a major security shift — it means real customer login/auth,
+a public untrusted surface, per-customer authorization (a customer may only see
+their own data), and almost certainly the RBAC/rate-limiting/headers work above as
+prerequisites. Treat any customer-facing work as needing its own security pass.
 
 ## Open items nobody has answered yet
 
