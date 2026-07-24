@@ -1,25 +1,25 @@
 <script setup>
 import { useRouter } from 'vue-router'
 
-import { clearDeviceToken, deviceToken } from './lib/api.js'
+import { currentUser, isAdmin, logout } from './lib/auth.js'
 
 const router = useRouter()
 
-function unpair() {
-  if (!confirm('Unpair this device? You will need the token again to use it.')) return
-  clearDeviceToken()
-  router.push({ name: 'pair' })
+async function onLogout() {
+  await logout()
+  router.push({ name: 'login' })
 }
 </script>
 
 <template>
   <header class="app-header">
     <h1>Blend Bar</h1>
-    <nav class="app-nav" v-if="deviceToken">
+    <nav class="app-nav" v-if="currentUser">
       <RouterLink :to="{ name: 'intake' }">Intake</RouterLink>
       <RouterLink :to="{ name: 'lookup' }">Lookup</RouterLink>
-      <RouterLink :to="{ name: 'admin' }">Admin</RouterLink>
-      <button class="icon" type="button" title="Unpair this device" @click="unpair">Unpair</button>
+      <RouterLink v-if="isAdmin" :to="{ name: 'admin' }">Admin</RouterLink>
+      <span class="who" :title="currentUser.email">{{ currentUser.email }}</span>
+      <button class="icon" type="button" @click="onLogout">Log out</button>
     </nav>
   </header>
 
@@ -27,3 +27,19 @@ function unpair() {
     <RouterView />
   </main>
 </template>
+
+<style scoped>
+.who {
+  color: var(--muted);
+  font-size: 0.8rem;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .who {
+    display: none;
+  }
+}
+</style>

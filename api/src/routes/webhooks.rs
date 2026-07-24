@@ -212,8 +212,11 @@ pub async fn receive(
     Ok(StatusCode::OK)
 }
 
-/// Recent webhook activity, for debugging reconciliation. Operator-authed.
-pub async fn recent(State(state): State<AppState>) -> Result<Json<Vec<WebhookEvent>>, AppError> {
+/// Recent webhook activity, for debugging reconciliation. Admin-only.
+pub async fn recent(
+    _admin: crate::employee_auth::AdminEmployee,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<WebhookEvent>>, AppError> {
     let events = sqlx::query_as::<_, WebhookEvent>(
         r#"
         select id, squarespace_notification_id, topic, squarespace_order_id,

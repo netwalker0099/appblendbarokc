@@ -1,22 +1,3 @@
-import { ref } from 'vue'
-
-const TOKEN_KEY = 'blendbar.device_token'
-
-/// The operator device token from `issue-device-token`. It is a device
-/// credential by design, so the stand tablet keeps it in localStorage and
-/// re-pairs if it is ever revoked.
-export const deviceToken = ref(localStorage.getItem(TOKEN_KEY) || '')
-
-export function setDeviceToken(token) {
-  deviceToken.value = token
-  localStorage.setItem(TOKEN_KEY, token)
-}
-
-export function clearDeviceToken() {
-  deviceToken.value = ''
-  localStorage.removeItem(TOKEN_KEY)
-}
-
 export class ApiError extends Error {
   constructor(message, status) {
     super(message)
@@ -25,12 +6,19 @@ export class ApiError extends Error {
   }
 }
 
+// Called whenever a request comes back 401, so auth state can be cleared centrally
+// (set by lib/auth.js). Sessions live in an httpOnly cookie — there's no token here.
+let onUnauthorized = () => {}
+export function setOnUnauthorized(fn) {
+  onUnauthorized = fn
+}
+
 async function request(path, { method = 'GET', body, headers = {} } = {}) {
   const res = await fetch(`/api${path}`, {
     method,
+    credentials: 'same-origin', // send the session cookie
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(deviceToken.value ? { Authorization: `Bearer ${deviceToken.value}` } : {}),
       ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -40,20 +28,25 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
   try {
     payload = await res.json()
   } catch {
-    // Empty or non-JSON body; leave payload null and fall through to status handling.
+    // Empty or non-JSON body; fall through to status handling.
   }
 
   if (!res.ok) {
-    // A revoked or mistyped token should drop the tablet back to the pairing
-    // screen rather than failing every later action with "unauthorized".
-    if (res.status === 401) clearDeviceToken()
+    if (res.status === 401) onUnauthorized()
     throw new ApiError(payload?.error || `request failed (${res.status})`, res.status)
   }
-
   return payload
 }
 
 export const api = {
+  // --- auth flow ---
+  login: (email, password) => request('/auth/login', { method: 'POST', body: { email, password } }),
+  mfaEnroll: () => request('/auth/mfa/enroll', { method: 'POST' }),
+  mfaVerify: (code) => request('/auth/mfa/verify', { method: 'POST', body: { code } }),
+  logout: () => request('/auth/logout', { method: 'POST' }),
+  me: () => request('/auth/me'),
+
+  // --- catalog / operations ---
   listIngredients: () => request('/ingredients'),
   createIngredient: (name, type) => request('/ingredients', { method: 'POST', body: { name, type } }),
   updateIngredient: (id, patch) => request(`/ingredients/${id}`, { method: 'PATCH', body: patch }),
@@ -80,20 +73,12 @@ export const api = {
     }),
 }
 
-/// Cheapest authenticated call we have — used to prove a pasted token works
-/// before we store it.
-export function verifyToken() {
-  return request('/ingredients')
-}
-
 /// Fetches the full DB backup as a file. Not JSON, so it bypasses `request()` —
 /// returns the raw blob plus the server-provided filename for the download.
 export async function downloadBackup() {
-  const res = await fetch('/api/admin/backup', {
-    headers: deviceToken.value ? { Authorization: `Bearer ${deviceToken.value}` } : {},
-  })
+  const res = await fetch('/api/admin/backup', { credentials: 'same-origin' })
   if (res.status === 401) {
-    clearDeviceToken()
+    onUnauthorized()
     throw new ApiError('unauthorized', 401)
   }
   if (!res.ok) {

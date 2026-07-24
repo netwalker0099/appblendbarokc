@@ -4,6 +4,7 @@ use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::employee_auth::AdminEmployee;
 use crate::error::AppError;
 use crate::models::ingredient::{Ingredient, IngredientType};
 use crate::models::mix::MAX_MIX_INGREDIENTS;
@@ -25,6 +26,7 @@ pub struct CreateIngredientRequest {
 }
 
 pub async fn create(
+    _admin: AdminEmployee,
     State(state): State<AppState>,
     Json(body): Json<CreateIngredientRequest>,
 ) -> Result<Json<Ingredient>, AppError> {
@@ -59,6 +61,7 @@ pub struct UpdateIngredientRequest {
 }
 
 pub async fn update(
+    _admin: AdminEmployee,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateIngredientRequest>,

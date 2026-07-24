@@ -43,7 +43,7 @@ async function load() {
 
 function handle(err) {
   error.value = err.message
-  if (err.status === 401) router.push({ name: 'pair' })
+  if (err.status === 401) router.push({ name: 'login' })
 }
 
 async function refreshIntegration() {

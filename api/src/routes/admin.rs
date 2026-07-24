@@ -3,6 +3,7 @@ use axum::http::header;
 use axum::response::Response;
 use tokio::process::Command;
 
+use crate::employee_auth::AdminEmployee;
 use crate::error::AppError;
 
 /// Full `pg_dump` of the database, returned as a downloadable `.sql` file.
@@ -16,7 +17,7 @@ use crate::error::AppError;
 /// Behind operator auth. NOTE: this is a full export of ALL customer PII and the
 /// (hashed) device tokens — the download is as sensitive as the database itself.
 /// No request input reaches the command, so there's no injection surface.
-pub async fn backup() -> Result<Response, AppError> {
+pub async fn backup(_admin: AdminEmployee) -> Result<Response, AppError> {
     let database_url = std::env::var("DATABASE_URL")
         .map_err(|_| AppError::Internal("DATABASE_URL not set".into()))?;
 

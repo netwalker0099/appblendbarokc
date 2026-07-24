@@ -306,11 +306,23 @@ until it is.
   `blendbar-api create-admin <email>` prints a one-time temp password. **The
   existing device-token auth and all operator routes are untouched** — 2a is purely
   additive; nothing is broken yet.
-- **2b — frontend + cutover (NEXT).** Login/MFA-enroll UI (replaces the pair
-  screen), switch the API client from the localStorage bearer token to cookie
-  sessions, apply `require_employee`/`require_admin` to the operator routes (worker
-  → intake+lookup; admin → +admin), hide admin nav for workers, then retire the
-  device-token middleware. This is the breaking cutover — do it carefully.
+- **2b — frontend + cutover (DONE, validated). The device-token model is
+  retired.** Operator routes now use the `employee_auth::require_employee`
+  middleware (replacing `require_operator_token`); admin-only routes take an
+  `AdminEmployee` extractor (ingredients/scents create+update, sync status/retry,
+  webhooks/recent, admin/backup → 403 for workers). Frontend: API client switched
+  to cookie sessions (`credentials: same-origin`, no bearer/localStorage);
+  `lib/auth.js` holds `currentUser`/`isAdmin`; `LoginView.vue` (login → enroll-with-
+  QR → verify, and login → verify) replaced `PairDevice.vue` (deleted); router
+  guard resolves the session once via `/api/auth/me` and gates by auth + `admin`
+  meta; `App.vue` shows role-based nav (Admin hidden for workers) + email + Log out.
+  **Gotcha for future:** axum 0.7 (axum-core 0.4.x) still needs `#[async_trait]` on
+  `FromRequestParts` impls — native `async fn` fails with E0195. **Also: never pipe
+  `docker compose build` through `tail` — it hides cargo failures (exit code
+  becomes tail's 0); use `set -o pipefail` or no pipe.** Validated: curl RBAC
+  matrix (worker 403s on all admin routes, admin 200s, no-session 401) + a browser
+  run (unauth→login, admin enroll→verify→full nav→/admin, logout, worker
+  login→MFA→no Admin nav→/admin redirects to intake).
 - **2c — user management UI (admin):** list/create employees (email+role → temp
   password), deactivate, reset password, change role.
 - Not yet done: login rate-limiting/lockout (Cloudflare later), email-code MFA

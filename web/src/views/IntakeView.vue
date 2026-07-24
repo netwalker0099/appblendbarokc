@@ -129,7 +129,7 @@ async function submit() {
     result.value = await api.submitIntake(payload, idempotencyKey.value)
   } catch (err) {
     error.value = err.message
-    if (err.status === 401) router.push({ name: 'pair' })
+    if (err.status === 401) router.push({ name: 'login' })
   } finally {
     busy.value = false
   }

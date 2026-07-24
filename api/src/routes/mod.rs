@@ -13,7 +13,7 @@ use axum::middleware;
 use axum::routing::{get, patch, post};
 use axum::Router;
 
-use crate::{auth, AppState};
+use crate::{employee_auth, AppState};
 
 pub fn build_router(state: AppState) -> Router {
     let authed = Router::new()
@@ -42,9 +42,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/sync/retry", post(sync::retry))
         .route("/api/webhooks/recent", get(webhooks::recent))
         .route("/api/admin/backup", get(admin::backup))
+        // Every operator route requires a full (MFA-complete) employee session;
+        // admin-only routes additionally use the `AdminEmployee` extractor.
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
-            auth::require_operator_token,
+            employee_auth::require_employee,
         ));
 
     // Employee auth flow — cookie-based, so these manage their own session and

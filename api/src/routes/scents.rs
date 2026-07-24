@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::employee_auth::AdminEmployee;
 use crate::error::AppError;
 use crate::models::scent::{Scent, ScentItem};
 use crate::routes::ingredients::assert_active_ingredients;
@@ -118,6 +119,7 @@ pub struct CreateScentRequest {
 }
 
 pub async fn create(
+    _admin: AdminEmployee,
     State(state): State<AppState>,
     Json(body): Json<CreateScentRequest>,
 ) -> Result<Json<ScentDetail>, AppError> {
@@ -156,6 +158,7 @@ pub struct UpdateScentRequest {
 }
 
 pub async fn update(
+    _admin: AdminEmployee,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateScentRequest>,

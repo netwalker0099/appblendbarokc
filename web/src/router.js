@@ -1,17 +1,17 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-import { deviceToken } from './lib/api.js'
+import { currentUser, loadUser } from './lib/auth.js'
 import AdminView from './views/AdminView.vue'
 import IntakeView from './views/IntakeView.vue'
+import LoginView from './views/LoginView.vue'
 import LookupView from './views/LookupView.vue'
-import PairDevice from './views/PairDevice.vue'
 
 const routes = [
   { path: '/', redirect: { name: 'intake' } },
   { path: '/intake', name: 'intake', component: IntakeView },
   { path: '/lookup', name: 'lookup', component: LookupView },
-  { path: '/admin', name: 'admin', component: AdminView },
-  { path: '/pair', name: 'pair', component: PairDevice },
+  { path: '/admin', name: 'admin', component: AdminView, meta: { admin: true } },
+  { path: '/login', name: 'login', component: LoginView },
 ]
 
 export const router = createRouter({
@@ -19,13 +19,22 @@ export const router = createRouter({
   routes,
 })
 
-// Every route but /pair needs a device token. Caddy serves index.html for all
-// paths, so deep links land here and get redirected the same way.
-router.beforeEach((to) => {
-  if (to.name !== 'pair' && !deviceToken.value) {
-    return { name: 'pair', query: { next: to.fullPath } }
+// Resolve the session once (from the httpOnly cookie), then gate by auth + role.
+let authChecked = false
+router.beforeEach(async (to) => {
+  if (!authChecked) {
+    await loadUser()
+    authChecked = true
   }
-  if (to.name === 'pair' && deviceToken.value) {
+
+  if (to.name === 'login') {
+    return currentUser.value ? { name: 'intake' } : true
+  }
+  if (!currentUser.value) {
+    return { name: 'login', query: to.fullPath === '/' ? {} : { next: to.fullPath } }
+  }
+  // Workers can't reach admin-only routes.
+  if (to.meta.admin && currentUser.value.role !== 'admin') {
     return { name: 'intake' }
   }
   return true

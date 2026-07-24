@@ -7,7 +7,8 @@ use std::sync::OnceLock;
 use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
-use axum::extract::{Request, State};
+use axum::extract::{FromRequestParts, Request, State};
+use axum::http::request::Parts;
 use axum::http::{header, HeaderMap, HeaderValue};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -194,16 +195,27 @@ pub async fn require_employee(
     Ok(next.run(req).await)
 }
 
-/// Middleware: require an admin session. Applied on top of `require_employee`,
-/// so the `AuthedEmployee` extension is already present.
-pub async fn require_admin(req: Request, next: Next) -> Result<Response, AppError> {
-    let is_admin = req
-        .extensions()
-        .get::<AuthedEmployee>()
-        .map(|e| e.role == EmployeeRole::Admin)
-        .unwrap_or(false);
-    if !is_admin {
-        return Err(AppError::Forbidden);
+/// Extractor that requires the request's employee to be an admin. Add it as a
+/// handler parameter (`_admin: AdminEmployee`) to gate admin-only routes; relies
+/// on [`require_employee`] having injected the `AuthedEmployee` extension.
+pub struct AdminEmployee(#[allow(dead_code)] pub AuthedEmployee);
+
+#[async_trait::async_trait]
+impl<S> FromRequestParts<S> for AdminEmployee
+where
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let employee = parts
+            .extensions
+            .get::<AuthedEmployee>()
+            .cloned()
+            .ok_or(AppError::Unauthorized)?;
+        if employee.role != EmployeeRole::Admin {
+            return Err(AppError::Forbidden);
+        }
+        Ok(AdminEmployee(employee))
     }
-    Ok(next.run(req).await)
 }

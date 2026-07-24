@@ -2,13 +2,17 @@ use axum::extract::State;
 use axum::Json;
 use serde_json::{json, Value};
 
+use crate::employee_auth::AdminEmployee;
 use crate::error::AppError;
 use crate::models::sync::SyncJob;
 use crate::AppState;
 
 /// Observability for the outbox: which backend is active, how many jobs sit in
 /// each state, and the most recent permanent failures (for debugging a bad push).
-pub async fn status(State(state): State<AppState>) -> Result<Json<Value>, AppError> {
+pub async fn status(
+    _admin: AdminEmployee,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, AppError> {
     let rows = sqlx::query_as::<_, (String, i64)>(
         "select status, count(*) from sync_outbox group by status",
     )
@@ -39,7 +43,10 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<Value>, AppErr
 
 /// Requeue every permanently-failed job for another pass — the manual "try again
 /// now" after fixing whatever broke (e.g. finally setting the API key).
-pub async fn retry(State(state): State<AppState>) -> Result<Json<Value>, AppError> {
+pub async fn retry(
+    _admin: AdminEmployee,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, AppError> {
     let requeued = sqlx::query(
         "update sync_outbox set status = 'pending', attempts = 0, last_error = null, next_attempt_at = now(), updated_at = now() where status = 'failed'",
     )
