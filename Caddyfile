@@ -43,7 +43,9 @@ sandbox.theblendbarokc.com {
 
 	handle {
 		root * /usr/share/blendbar-site
-		try_files {path} {path}.html /index.html
+		# {path}/index.html serves /portal (portal/index.html); {path}.html serves
+		# /portal/verify (portal/verify.html).
+		try_files {path} {path}.html {path}/index.html /index.html
 		file_server
 	}
 

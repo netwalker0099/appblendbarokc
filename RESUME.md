@@ -360,13 +360,25 @@ until it is.
   `${CUSTOMER_SITE_URL:-https://sandbox.theblendbarokc.com}/portal/verify?token=`.
   Validated: link generation/anti-enumeration, single-use token, session, history,
   reorder (incl. 404 on someone else's mix, 400 on a never-ordered scent).
-- **3b — portal frontend (NEXT).** Replace the `site/portal.html` stub with the
-  real flow on the sandbox site (email entry → "check your email" → the
-  `/portal/verify` landing consumes the token → dashboard of saved blends with
-  one-tap reorder). Static + a little JS, calling `sandbox.theblendbarokc.com/api`.
-- **Blocked bit:** real email send (owner setting up) — until then the login link
-  only appears in the API logs, so the end-to-end customer flow can't be exercised
-  by a real user yet.
+- **3b — portal frontend (DONE, validated).** `site/portal/` (index.html + app.js
+  + verify.html + verify.js), served on the sandbox site; replaced the old
+  `portal.html` stub. Flow: `/portal` → email entry (→ `/api/customer/login`) →
+  "check your email"; the magic link → `/portal/verify?token=` → verify.js consumes
+  it → `/portal` dashboard (`/me` + `/history`) listing custom blends + signature
+  scents (by **name only** — no proprietary formula shown to customers), each with
+  a bottle-size select and one-tap **Reorder** (→ a staff-fulfilled `lead` order).
+  Vanilla JS under the strict CSP (external scripts only). **Gotcha:** portal pages
+  must use **absolute** asset/script paths (`/portal/app.js`, `/styles.css`) — with
+  the `/portal` no-trailing-slash URL, relative `app.js` resolved to `/app.js` and
+  fell through to the marketing HTML (wrong MIME → refused). Caddy sandbox
+  `try_files` gained `{path}/index.html` to serve the portal directory. Validated
+  with a full browser run (login form → check-email → magic-link verify →
+  dashboard → reorder creates a lead order).
+- **Only blocker left:** real email send (owner setting up). Until then the login
+  link is logged, not emailed — a real customer can't complete login end-to-end,
+  but everything else is built and works (validated by pulling the link from logs).
+  When email lands: swap the `tracing::info!` stub in `customer_portal::request_link`
+  for a real send. **Phase 3 is otherwise complete.**
 
 **Phase 4 — promote to production:** cut `theblendbarokc.com` over to our site,
 redirect from Squarespace, keep sandbox for testing.
