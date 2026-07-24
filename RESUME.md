@@ -291,10 +291,30 @@ TLS issues automatically once it resolves; until then Caddy retries ACME (harmle
 app.* fine). Email not ready → customer magic-link + email-based MFA get stubbed
 until it is.
 
-**Phase 2 — employee auth (NEXT, big):** user accounts + RBAC (roles: `worker` →
-intake only; `admin` → RBAC/user mgmt, backups, integrations, everything in
-`/admin`) + required MFA (TOTP first). Sessions, user-management UI, migrate off the
-device-token model. Security-critical; do its own review.
+**Phase 2 — employee auth (RBAC + MFA). In progress, built in increments:**
+- **2a — auth backend + bootstrap (DONE, curl-validated).** Migration 0007
+  (`employees`, `employee_sessions`). `employee_auth.rs`: argon2id passwords, TOTP
+  (RFC 6238, totp-rs, server QR), 32-byte session tokens hashed in DB, httpOnly +
+  Secure + SameSite=Lax cookie `bb_session`, timing-safe login (dummy-hash on
+  missing email), and `require_employee`/`require_admin` middleware +
+  `AuthedEmployee` extension (defined, wired in 2b). Roles `worker`/`admin`
+  (`EmployeeRole`). Auth-flow handlers in `routes/session.rs` on the OPEN router:
+  `POST /api/auth/login` (→ pending session, `enroll_required`|`mfa_required`),
+  `/api/auth/mfa/enroll` (secret+QR), `/api/auth/mfa/verify` (upgrades the pending
+  session to full), `/api/auth/logout`, `GET /api/auth/me`. `mfa_pending` on the
+  session gates everything until MFA is done. Bootstrap: CLI
+  `blendbar-api create-admin <email>` prints a one-time temp password. **The
+  existing device-token auth and all operator routes are untouched** — 2a is purely
+  additive; nothing is broken yet.
+- **2b — frontend + cutover (NEXT).** Login/MFA-enroll UI (replaces the pair
+  screen), switch the API client from the localStorage bearer token to cookie
+  sessions, apply `require_employee`/`require_admin` to the operator routes (worker
+  → intake+lookup; admin → +admin), hide admin nav for workers, then retire the
+  device-token middleware. This is the breaking cutover — do it carefully.
+- **2c — user management UI (admin):** list/create employees (email+role → temp
+  password), deactivate, reset password, change role.
+- Not yet done: login rate-limiting/lockout (Cloudflare later), email-code MFA
+  (second method, when email is ready), forced temp-password change on first login.
 
 **Phase 3 — customer portal:** magic-link email login → session → match prior
 intakes by email → staff-fulfilled reorder. Email send stubbed until ready.

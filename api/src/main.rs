@@ -1,5 +1,6 @@
 mod auth;
 mod db;
+mod employee_auth;
 mod error;
 mod models;
 mod routes;
@@ -42,6 +43,39 @@ async fn main() {
             .expect("failed to issue device token");
         println!("Device token for \"{label}\" (store this now, it will not be shown again):");
         println!("{token}");
+        return;
+    }
+
+    if args.get(1).map(String::as_str) == Some("create-admin") {
+        let email = args
+            .get(2)
+            .expect("usage: blendbar-api create-admin <email>")
+            .trim()
+            .to_lowercase();
+        let pool = db::connect(&database_url)
+            .await
+            .expect("failed to connect to database or run migrations");
+        let temp = employee_auth::generate_temp_password();
+        let hash = employee_auth::hash_password(&temp).expect("failed to hash password");
+        let result = sqlx::query(
+            "insert into employees (email, password_hash, role) values ($1, $2, 'admin')",
+        )
+        .bind(&email)
+        .bind(&hash)
+        .execute(&pool)
+        .await;
+        match result {
+            Ok(_) => {
+                println!("Admin account created: {email}");
+                println!("Temporary password (shown once): {temp}");
+                println!("Sign in with these, then you'll be prompted to set up MFA.");
+            }
+            Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
+                eprintln!("An account for {email} already exists.");
+                std::process::exit(1);
+            }
+            Err(e) => panic!("failed to create admin: {e}"),
+        }
         return;
     }
 

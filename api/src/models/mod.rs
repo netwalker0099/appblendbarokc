@@ -1,4 +1,5 @@
 pub mod customer;
+pub mod employee;
 pub mod ingredient;
 pub mod mix;
 pub mod order;

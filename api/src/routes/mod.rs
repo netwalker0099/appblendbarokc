@@ -5,6 +5,7 @@ pub mod intake;
 pub mod mixes;
 pub mod orders;
 pub mod scents;
+pub mod session;
 pub mod sync;
 pub mod webhooks;
 
@@ -46,10 +47,20 @@ pub fn build_router(state: AppState) -> Router {
             auth::require_operator_token,
         ));
 
+    // Employee auth flow — cookie-based, so these manage their own session and
+    // sit outside the bearer-token middleware.
+    let auth_flow = Router::new()
+        .route("/api/auth/login", post(session::login))
+        .route("/api/auth/mfa/enroll", post(session::mfa_enroll))
+        .route("/api/auth/mfa/verify", post(session::mfa_verify))
+        .route("/api/auth/logout", post(session::logout))
+        .route("/api/auth/me", get(session::me));
+
     Router::new()
         .route("/api/health", get(crate::health))
         // Public but HMAC-verified — Squarespace can't present an operator token.
         .route("/api/webhooks/squarespace", post(webhooks::receive))
+        .merge(auth_flow)
         .merge(authed)
         .with_state(state)
 }
