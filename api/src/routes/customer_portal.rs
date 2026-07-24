@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use axum::extract::State;
 use axum::http::HeaderMap;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{Duration, Utc};
 use serde::Deserialize;
@@ -39,8 +39,40 @@ pub struct RequestLinkBody {
 pub async fn request_link(
     State(state): State<AppState>,
     Json(body): Json<RequestLinkBody>,
-) -> Result<Json<Value>, AppError> {
+) -> Result<Response, AppError> {
     let email = body.email.trim().to_lowercase();
+
+    // ⚠️ TEMPORARY DEV BYPASS (remove when real email is wired — see RESUME).
+    // A single whitelisted email (PORTAL_BYPASS_EMAIL) signs straight into the
+    // portal without a magic link, so the owner can preview the customer page.
+    let bypass = std::env::var("PORTAL_BYPASS_EMAIL")
+        .ok()
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty());
+    if bypass.as_deref() == Some(email.as_str()) {
+        let customer = sqlx::query_as::<_, Customer>(
+            "insert into customers (email) values ($1) on conflict (email) do update set email = excluded.email returning *",
+        )
+        .bind(&email)
+        .fetch_one(&state.db)
+        .await?;
+        let token = generate_session_token();
+        let expires = Utc::now() + Duration::days(ca::SESSION_TTL_DAYS);
+        sqlx::query(
+            "insert into customer_sessions (token_hash, customer_id, expires_at) values ($1, $2, $3)",
+        )
+        .bind(hash_token(&token))
+        .bind(customer.id)
+        .bind(expires)
+        .execute(&state.db)
+        .await?;
+        tracing::warn!(email = %email, "PORTAL DEV BYPASS used — remove before launch");
+        return Ok(json_with_cookie(
+            ca::set_cookie(&token),
+            json!({ "status": "bypass" }),
+        ));
+    }
+
     if let Some(customer) =
         sqlx::query_as::<_, Customer>("select * from customers where email = $1")
             .bind(&email)
@@ -64,7 +96,7 @@ pub async fn request_link(
         // caller (that would defeat the email-ownership check).
         tracing::info!(email = %email, "customer magic link: {link}");
     }
-    Ok(Json(json!({ "status": "sent" })))
+    Ok(Json(json!({ "status": "sent" })).into_response())
 }
 
 #[derive(Deserialize)]

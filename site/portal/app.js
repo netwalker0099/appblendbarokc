@@ -47,11 +47,14 @@
     const btn = document.getElementById('loginBtn')
     btn.disabled = true
     btn.textContent = 'Sending…'
+    let res = null
     try {
-      await api('/login', { method: 'POST', body: { email } })
+      res = await api('/login', { method: 'POST', body: { email } })
     } catch {
       /* generic response regardless */
     }
+    // Dev bypass: session already set — go straight to the dashboard.
+    if (res && res.status === 'bypass') return init()
     sentView(email)
   }
 

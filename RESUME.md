@@ -379,6 +379,18 @@ until it is.
   but everything else is built and works (validated by pulling the link from logs).
   When email lands: swap the `tracing::info!` stub in `customer_portal::request_link`
   for a real send. **Phase 3 is otherwise complete.**
+- **⚠️ REMINDER — WHEN WIRING EMAIL, ALSO UNDO THE DEV PORTAL BYPASS** (added
+  2026-07-24 at the owner's request so he could preview the customer page without
+  email). To remove:
+  1. Delete the `PORTAL_BYPASS_EMAIL` branch at the top of
+     `customer_portal::request_link` (marked with a ⚠️ comment).
+  2. Remove `PORTAL_BYPASS_EMAIL` from `.env` and `docker-compose.yml` (leave the
+     blank line in `.env.example` or drop it), rebuild/redeploy the api.
+  3. Delete the seeded **example data**: customer `rtaylor@theblendbarokc.com`
+     (name "Ryan Taylor (example)") + its example mix/orders, and the
+     `Golden Hour (example)` scent. (While the bypass is on, ANYONE who types
+     `rtaylor@theblendbarokc.com` on the portal is logged into that example
+     customer — it's demo data, but that's why this must come out.)
 
 **Phase 4 — promote to production:** cut `theblendbarokc.com` over to our site,
 redirect from Squarespace, keep sandbox for testing.
@@ -416,9 +428,13 @@ public scent page with monogram, notes chips, per-size price radios, and a Buy C
 (placeholder → "checkout launching soon" until Step 3). Portal scent cards gained a
 **Share** button → panel with the `/s/<id>` link (copy) + the QR `<img>`. Validated
 (curl: names-only/no-amount-leak/404/QR-svg + `/s/<id>` serves the page; browser:
-public page renders name/notes/prices, QR loads, Buy shows placeholder). **Custom-
-blend sharing/pricing deferred** — scents only for now (bespoke blends still need a
-global per-size price decision before they can be shared/bought).
+public page renders name/notes/prices, QR loads, Buy shows placeholder).
+
+**Step 2.5 — global custom-blend pricing (DONE).** Migration 0010 adds a singleton
+`settings` table with `custom_price_oz3_4/oz1_7/roller` (bespoke blends are priced
+uniformly by size, not per blend). `GET/PATCH /api/settings` (admin, negatives→400)
++ a "Custom blend pricing" card in Admin. Validated. Custom-blend *sharing* (public
+page/QR for a blend) is still deferred — the pricing it needed now exists.
 
 **Step 3 — Square Hosted Checkout (BLOCKED on Square sandbox credentials).** Needs
 from owner: Square **Application ID**, **Sandbox Access Token**, **Location ID**.

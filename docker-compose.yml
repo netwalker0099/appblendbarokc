@@ -26,6 +26,8 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       SQUARESPACE_API_KEY: ${SQUARESPACE_API_KEY}
       SQUARESPACE_WEBHOOK_SECRET: ${SQUARESPACE_WEBHOOK_SECRET:-}
+      # TEMPORARY dev bypass for the customer portal (remove when email is wired).
+      PORTAL_BYPASS_EMAIL: ${PORTAL_BYPASS_EMAIL:-}
       RUST_LOG: info
     expose:
       - "8080"

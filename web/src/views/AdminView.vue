@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import CatalogManager from '../components/CatalogManager.vue'
@@ -16,6 +16,8 @@ const scents = ref([])
 const employees = ref([])
 const sync = ref(null)
 const webhooks = ref([])
+const customPrices = reactive({ custom_price_oz3_4: '', custom_price_oz1_7: '', custom_price_roller: '' })
+const savingPrices = ref(false)
 
 const loading = ref(true)
 const error = ref('')
@@ -27,10 +29,11 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [ing, sc, emp, st, wh] = await Promise.all([
+    const [ing, sc, emp, set, st, wh] = await Promise.all([
       api.listIngredients(),
       api.listScents(),
       api.listEmployees(),
+      api.getSettings(),
       api.getSyncStatus(),
       api.listWebhooks(),
     ])
@@ -39,6 +42,9 @@ async function load() {
     employees.value = emp
     sync.value = st
     webhooks.value = wh
+    for (const k of ['custom_price_oz3_4', 'custom_price_oz1_7', 'custom_price_roller']) {
+      customPrices[k] = set[k] ?? ''
+    }
   } catch (err) {
     handle(err)
   } finally {
@@ -56,6 +62,23 @@ async function reloadTeam() {
     employees.value = await api.listEmployees()
   } catch (err) {
     handle(err)
+  }
+}
+
+async function saveCustomPrices() {
+  savingPrices.value = true
+  try {
+    const num = (v) => (v === '' || v === null ? null : Number(v))
+    await api.updateSettings({
+      custom_price_oz3_4: num(customPrices.custom_price_oz3_4),
+      custom_price_oz1_7: num(customPrices.custom_price_oz1_7),
+      custom_price_roller: num(customPrices.custom_price_roller),
+    })
+    flash('Saved custom-blend prices.')
+  } catch (err) {
+    handle(err)
+  } finally {
+    savingPrices.value = false
   }
 }
 
@@ -186,6 +209,28 @@ function formatTime(value) {
       @toggle="toggleScent"
       @save="saveScentFormula"
     />
+
+    <div class="card">
+      <h2>Custom blend pricing</h2>
+      <p class="muted">Retail price per size for bespoke custom blends — applies to every custom blend.</p>
+      <div class="row">
+        <div>
+          <label>3.4 oz</label>
+          <input type="number" inputmode="decimal" min="0" step="0.01" v-model="customPrices.custom_price_oz3_4" />
+        </div>
+        <div>
+          <label>1.7 oz</label>
+          <input type="number" inputmode="decimal" min="0" step="0.01" v-model="customPrices.custom_price_oz1_7" />
+        </div>
+        <div>
+          <label>Roller</label>
+          <input type="number" inputmode="decimal" min="0" step="0.01" v-model="customPrices.custom_price_roller" />
+        </div>
+      </div>
+      <button class="ghost" type="button" :disabled="savingPrices" style="margin-top: 0.8rem" @click="saveCustomPrices">
+        {{ savingPrices ? 'Saving…' : 'Save custom-blend prices' }}
+      </button>
+    </div>
 
     <TeamManager
       :employees="employees"

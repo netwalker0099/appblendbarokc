@@ -9,6 +9,7 @@ pub mod orders;
 pub mod public;
 pub mod scents;
 pub mod session;
+pub mod settings;
 pub mod sync;
 pub mod webhooks;
 
@@ -45,6 +46,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/sync/retry", post(sync::retry))
         .route("/api/webhooks/recent", get(webhooks::recent))
         .route("/api/admin/backup", get(admin::backup))
+        .route("/api/settings", get(settings::get).patch(settings::update))
         .route("/api/employees", get(employees::list).post(employees::create))
         .route("/api/employees/:id", patch(employees::update))
         .route("/api/employees/:id/reset-password", post(employees::reset_password))
