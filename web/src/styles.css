@@ -356,6 +356,55 @@ code {
   color: var(--muted);
 }
 
+.pour-caption {
+  margin: 0.8rem 0 0.3rem;
+}
+
+/* All-sizes pour chart. Scrolls horizontally on very narrow screens rather than
+   forcing the page to. */
+.pour-chart {
+  overflow-x: auto;
+}
+
+.pour-chart table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pour-chart th,
+.pour-chart td {
+  padding: 0.4rem 0.6rem;
+  text-align: right;
+  white-space: nowrap;
+  border-top: 1px solid var(--border);
+}
+
+.pour-chart th.ing,
+.pour-chart td.ing,
+.pour-chart thead th:first-child {
+  text-align: left;
+}
+
+.pour-chart thead th {
+  border-top: none;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.pour-chart tfoot td {
+  font-weight: 700;
+  border-top: 2px solid var(--border);
+}
+
+/* The bottle size currently selected for the order. */
+.pour-chart .current {
+  background: var(--surface-alt);
+}
+
 .list-item {
   display: flex;
   gap: 0.75rem;

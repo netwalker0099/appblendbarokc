@@ -162,6 +162,12 @@ below. All planned milestones are now complete.)
   only API change was adding `webhook_receiver_enabled` to `/api/sync/status`.
   Server-side secrets are deliberately not settable from the UI. No role model yet
   — any paired device can reach `/admin` (user-level auth is still deferred).
+- **Pour chart (all sizes):** `MixBuilder` shows, below the ingredient rows, a
+  table of each ingredient + total at all three bottle sizes (3.4oz base, 1.7oz =
+  ½, roller = ⅒), derived live from the base amounts (`web/src/lib/bottle.js`
+  `scaleMl`). The size selected for the order is highlighted. Because ScentManager
+  reuses MixBuilder, scent formulas get the same chart. Styles: `.pour-chart` in
+  `styles.css` (horizontally scrollable, tabular-nums).
 - **Mix-builder editing (earlier session):** each mix row is now an editable
   `<select class="name">` so an operator can swap an ingredient in place without
   losing its amount (`MixBuilder.vue::setIngredient` / `optionsFor`). A row's

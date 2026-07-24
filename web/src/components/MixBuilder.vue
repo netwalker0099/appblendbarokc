@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 
-import { INGREDIENT_TYPES, bottleLabel, formatMl, scaleMl, totalMl } from '../lib/bottle.js'
+import { BOTTLE_SIZES, INGREDIENT_TYPES, formatMl, scaleMl, totalMl } from '../lib/bottle.js'
 
 /// Mirrors MAX_MIX_INGREDIENTS in the API. The server is still the authority —
 /// this only keeps the operator from building a mix that would be rejected.
@@ -145,22 +145,39 @@ function removeAt(index) {
       Maximum of {{ MAX_INGREDIENTS }} ingredients reached.
     </p>
 
+    <!-- Pour chart: enter amounts once at the 3.4oz base and every bottle size is
+         derived here (1.7oz is half, roller a tenth). The size being ordered, if
+         any, is highlighted. -->
     <template v-if="modelValue.length">
-      <div class="mix-total">
-        <span>Total (3.4 oz base)</span>
-        <span>{{ formatMl(totalMl(modelValue)) }} ml</span>
+      <p class="muted pour-caption">Pour chart — amounts per bottle size (ml)</p>
+      <div class="pour-chart">
+        <table>
+          <thead>
+            <tr>
+              <th>Ingredient</th>
+              <th v-for="s in BOTTLE_SIZES" :key="s.value" :class="{ current: s.value === size }">
+                {{ s.label }}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in modelValue" :key="item.ingredient_id">
+              <td class="ing">{{ nameFor(item.ingredient_id) }}</td>
+              <td v-for="s in BOTTLE_SIZES" :key="s.value" :class="{ current: s.value === size }">
+                {{ formatMl(scaleMl(item.amount_ml, s.value)) }}
+              </td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td class="ing">Total</td>
+              <td v-for="s in BOTTLE_SIZES" :key="s.value" :class="{ current: s.value === size }">
+                {{ formatMl(totalMl(modelValue, s.value)) }}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
       </div>
-      <div class="mix-total" v-if="size !== 'oz3_4'">
-        <span>Poured for {{ bottleLabel(size) }}</span>
-        <span>{{ formatMl(totalMl(modelValue, size)) }} ml</span>
-      </div>
-      <p class="muted" v-if="size !== 'oz3_4'">
-        {{
-          modelValue
-            .map((i) => `${nameFor(i.ingredient_id)} ${formatMl(scaleMl(i.amount_ml, size))}ml`)
-            .join(' · ')
-        }}
-      </p>
     </template>
   </div>
 </template>
