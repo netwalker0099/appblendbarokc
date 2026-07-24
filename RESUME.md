@@ -1,6 +1,7 @@
 # Blend Bar — Resume Notes
 
-Last updated: 2026-07-23, after Milestone 6 (Squarespace webhook receiver, mock).
+Last updated: 2026-07-24 — DB wiped clean for real-data entry (all 7 milestones
+plus ingredient types & scent formulas done; see history below).
 
 Read this first in a new session, then README.md for deploy mechanics.
 
@@ -219,23 +220,21 @@ below. All planned milestones are now complete.)
   `.env.example` but is **dead** — grep confirms no Rust code reads it. It predates
   the per-device-token design landing. Safe to delete from both files whenever
   convenient; harmless to leave.
-- **Fixture/test data is in the live DB** from Milestone 3 validation:
-  - customers: `visitor@example.com` (Jamie Visitor), `edge5@example.com`
-  - ingredients: Bergamot, Sandalwood
-  - scents: Golden Hour
-  - one `custom_mix` order and one `set_perfume` order, both status `paid`
-  - one operator device token issued, labeled "Stand iPad" (the raw token from
-    that session is gone — issue a fresh one if you need to authenticate a client)
-
-  Milestone 4 added more throwaway rows on top of that: `m4probe@example.com`,
-  `m4flow@example.com`, and one `smoke…@example.com` customer + order per smoke-test
-  run (each with a one-ingredient mix). Device tokens labelled `dev-session-*` and
-  `smoke` were also issued and are still active.
-
-  **Still unanswered, and now more urgent:** wipe all of this before launch, or keep
-  it as fixtures? The smoke test adds a row every run, so this only grows. Deactivate
-  the stray device tokens (`update operator_devices set active = false where label
-  like 'dev-session-%' or label = 'smoke'`) whenever you clean up.
+- **The DB was wiped clean on 2026-07-24** to start entering real data. All
+  business tables (`customers`, `orders`, `mixes`, `mix_items`, `scents`,
+  `scent_items`, `ingredients`, `customer_scent_preferences`, `webhook_events`,
+  `sync_outbox`) were `TRUNCATE … CASCADE`'d to zero rows — the ingredient and
+  scent **catalogs are empty**, so real ingredients (with types) and scents must
+  be added via `/admin` before intake can build mixes / take set-perfume orders.
+  - `operator_devices` was **deliberately kept** (4 active tokens preserved), so
+    an already-paired tablet stays paired. Raw values of those tokens are not
+    recoverable — issue a fresh one if a device needs to pair.
+  - Schema + all migrations are intact (`_sqlx_migrations` untouched).
+  - A pre-wipe backup is on the VPS **outside the repo** at
+    `/opt/blendbar-preclear-backup-20260724-142713.sql` (`pg_dump`, ~32K) if any
+    of the old fixture data is ever needed back.
+  - The old smoke test (`web/smoke.js`) still writes a customer+order per run, so
+    don't run it against this instance now that it holds real data.
 
 ## Frontend decisions locked in (Milestone 4)
 
@@ -274,8 +273,9 @@ All seven planned milestones are complete. What remains is going live for real:
   in `.env` is `dev_webhook_secret_change_me` so the receiver is enabled for
   testing. Replace with the real subscription secret before going live, and
   register the subscription on the Squarespace side.
-- Whether to wipe or keep the fixture data described above (now also includes M5/M6
-  sync-test customers/orders carrying `mock_*` ids and rows in `webhook_events`).
+- The `mock_*` external ids concern is now moot — the DB was wiped clean on
+  2026-07-24 (see "What's actually running" above), so there are no stale synced
+  rows left. The catalogs are empty and ready for real data.
 
 ## How to pick this back up
 
@@ -287,7 +287,7 @@ All seven planned milestones are complete. What remains is going live for real:
    real webhook secret, swap them in, and verify the two untested live HTTP paths
    (`HttpSquarespace` push/`get_order` and the webhook signature wire format).
 
-Note: validation across sessions left several deactivated device tokens
-(`m5-validate`, `m6-validate`, `verify`, `m7-validate`, `smoke`) and a deactivated
-`Vetiver (swap-test)` ingredient in the DB, plus mock-synced test customers/orders
-and `webhook_events` rows — all part of the fixture-cruft-vs-wipe question above.
+Note: the instance was wiped clean on 2026-07-24 for real-data entry — empty
+ingredient/scent catalogs, no customers/orders. Add the real ingredient catalog
+(with Base/Top Note/Heart Note types) and scents via `/admin` first. Pre-wipe
+backup at `/opt/blendbar-preclear-backup-20260724-142713.sql` if needed.
