@@ -142,16 +142,18 @@ function formatTime(value) {
           spellcheck="false"
           placeholder="hello@theblendbarokc.com"
         />
-        <p class="muted" style="margin: 0.3rem 0 0; font-size: 0.85rem">
-          Must be a mailbox on your Workspace domain — the relay refuses to send as
-          a domain it doesn’t own.
-        </p>
       </div>
       <div class="field grow">
         <label>Sender name</label>
         <input v-model="form.from_name" type="text" placeholder="The Blend Bar" />
       </div>
     </div>
+    <!-- Below the row, not inside a column: help text in a flex-end row extends
+         that column's box and pushes its neighbour out of line. -->
+    <p class="muted field-help">
+      The From address must be a mailbox on your Workspace domain — the relay
+      refuses to send as a domain it doesn’t own.
+    </p>
 
     <div class="field">
       <label>Reply-to (optional)</label>

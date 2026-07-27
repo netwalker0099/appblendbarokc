@@ -384,17 +384,19 @@ function startAnother() {
         <div class="field grow">
           <label>Price override (optional)</label>
           <input v-model="line.amount" type="number" inputmode="decimal" min="0" step="0.01" />
-          <p class="muted" style="margin: 0.3rem 0 0; font-size: 0.85rem">
-            <template v-if="line.amount === '' && catalogPrice(line)">
-              Catalogue price ${{ catalogPrice(line) }} each.
-            </template>
-            <template v-else-if="line.amount === ''">
-              No catalogue price set for this size — add one in Admin, or type a price.
-            </template>
-            <template v-else>Overriding the catalogue price.</template>
-          </p>
         </div>
       </div>
+      <!-- Below the row, not inside the field: help text in a flex-end row
+           extends that column and pushes the quantity input out of line. -->
+      <p class="muted field-help">
+        <template v-if="line.amount === '' && catalogPrice(line)">
+          Catalogue price ${{ catalogPrice(line) }} each.
+        </template>
+        <template v-else-if="line.amount === ''">
+          No catalogue price set for this size — add one in Admin, or type a price.
+        </template>
+        <template v-else>Overriding the catalogue price.</template>
+      </p>
 
       <template v-if="line.type === 'set_perfume'">
         <div class="field">

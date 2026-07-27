@@ -127,6 +127,30 @@ label {
   margin-bottom: 0;
 }
 
+/* A .field inside a .row must not carry its own bottom margin. The row aligns
+   its children on flex-end, so that margin lifts the input above everything
+   beside it — which is how the quantity/price and to/send-test controls drifted
+   out of line. Spacing below the row is the row's job, not the field's. */
+.row > .field {
+  margin-bottom: 0;
+}
+
+/* Help text for a whole row. It lives *after* the row rather than inside one of
+   its fields: anything below an input inside a flex-end row makes that column
+   taller and drags its neighbours out of alignment.
+   Hugs the inputs above it, and carries the gap to whatever follows. */
+.field-help {
+  margin: 0.35rem 0 0.9rem;
+  font-size: 0.85rem;
+}
+
+/* The row's fields no longer carry a bottom margin (see above), so the gap to
+   the next field has to come from somewhere. Only applies where a field really
+   does follow a row — button rows and search rows are unaffected. */
+.row + .field {
+  margin-top: 0.9rem;
+}
+
 input[type='text'],
 input[type='email'],
 input[type='number'],
