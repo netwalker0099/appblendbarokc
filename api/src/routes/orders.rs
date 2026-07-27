@@ -12,6 +12,11 @@ use crate::AppState;
 pub struct ListOrdersQuery {
     pub status: Option<String>,
     pub customer_id: Option<Uuid>,
+    /// Only orders not already claimed by a cart. This is what the checkout
+    /// screen lists — an order already on a cart must not be offered for sale a
+    /// second time.
+    #[serde(default)]
+    pub uncarted: bool,
 }
 
 pub async fn list(
@@ -23,12 +28,17 @@ pub async fn list(
         select * from orders
         where ($1::text is null or status = $1)
           and ($2::uuid is null or customer_id = $2)
+          and (
+            not $3
+            or id not in (select order_id from cart_items where order_id is not null)
+          )
         order by created_at desc
         limit 100
         "#,
     )
     .bind(q.status)
     .bind(q.customer_id)
+    .bind(q.uncarted)
     .fetch_all(&state.db)
     .await?;
     Ok(Json(orders))

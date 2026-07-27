@@ -1,7 +1,13 @@
 # Blend Bar — Resume Notes
 
-Last updated: 2026-07-24 — DB wiped clean for real-data entry (all 7 milestones
-plus ingredient types & scent formulas done; see history below).
+Last updated: 2026-07-27 — **billing migrated from Squarespace to Square**
+(Milestone 9 below): carts → Square hosted checkout → webhook → reconciliation.
+Built and tested against the mock; no real Square credentials on this box yet, so
+nothing has been verified against the live service. Booking/cancellation terms also
+added to the sandbox site's events section.
+
+Previously: 2026-07-24 — DB wiped clean for real-data entry (all 7 milestones plus
+ingredient types & scent formulas done; see history below).
 
 Read this first in a new session, then README.md for deploy mechanics.
 
@@ -436,21 +442,91 @@ uniformly by size, not per blend). `GET/PATCH /api/settings` (admin, negatives�
 + a "Custom blend pricing" card in Admin. Validated. Custom-blend *sharing* (public
 page/QR for a blend) is still deferred — the pricing it needed now exists.
 
-**Step 3 — Square Hosted Checkout (BLOCKED on Square sandbox credentials).** Needs
-from owner: Square **Application ID**, **Sandbox Access Token**, **Location ID**.
-Then: create-payment-link endpoint → redirect → Square webhook receiver (signature-
-verified, like the Squarespace one) → mark order `paid` + flag staff/event
-fulfilment. Once in, the existing portal **Reorder** can use the same checkout.
+**Step 3 — Square Hosted Checkout (BUILT 2026-07-27, unverified against real Square).**
+Superseded by Milestone 9 below: Squarespace was removed entirely and Square is now
+the billing system. Still needs the owner's Square credentials to be exercised for
+real.
+
+## Milestone 9: Squarespace → Square billing migration (2026-07-27)
+
+Owner asked to drop Squarespace, send the "cart" to Square so all transactions happen
+there, and be able to reconcile site sales against Square transactions. Done, with
+one honest caveat: **no Square credentials exist on this box, so the live HTTP path
+has never made a real request.** Everything below is validated against the mock
+backend and covered by 24 unit tests (`cargo test`).
+
+**Removed.** `api/src/squarespace/`, `routes/webhooks.rs`, `models/webhook.rs`, the
+`webhook_events` table, `orders.squarespace_order_id`, and both `SQUARESPACE_*` env
+vars. `customers.squarespace_contact_id` was **renamed** to `square_customer_id` (it
+only ever held nulls). Nothing of value was lost — the old order ids were all mock
+values like `mock_order_…`; no real Squarespace record ever existed.
+
+**New schema (migration 0011).** `carts`, `cart_items`, `square_webhook_events`,
+`reconciliation_runs`. Cart money is `bigint` **cents**, matching Square, which never
+accepts decimals; `orders.amount numeric(10,2)` is untouched and the cart converts
+from it at build time via `square::money::to_cents` (banker's rounding, unit-tested —
+the one place a silent 100x error could hide without ever throwing).
+
+**The model.** A *cart* is one checkout = one Square order = one payment. Its lines
+either point at an `orders` row (a blend) or stand alone (event deposit, rush fee,
+hotel line — the booking-terms items). `cart_items.order_id` is uniquely indexed, so
+a blend can never be billed on two carts; cancelling a cart nulls those links to
+release them (`billing::cancel_cart`), which is also how the 24h abandoned-checkout
+sweep works.
+
+**The flow.** intake (order, `lead`, no money) → `POST /api/carts` → `POST
+/api/carts/:id/checkout` (Square order + hosted payment link) → operator shows
+`/api/carts/:id/checkout.svg` as a **QR code** → customer pays on their own phone on
+Square's page → `payment.updated` webhook → cart `paid`, its orders `paid`.
+
+**Webhook receiver.** `POST /api/webhooks/square`, public but signature-verified —
+that verification is the whole security boundary, since the endpoint marks carts
+paid. Square signs `notification_url + raw_body`, HMAC-SHA256, **base64** (the old
+Squarespace one was hex, and its header/encoding were guesses; Square's is
+documented). `SQUARE_WEBHOOK_URL` is configured, **not** derived from `Host`, because
+`Host` is attacker-controlled and deriving it would let a caller choose the string
+their forged signature was computed over. Unset key or URL ⇒ receiver returns 503.
+Nine tests cover this, including tampered body, wrong key, wrong URL, and malformed
+base64.
+
+**Missed-webhook backstop.** `POST /api/carts/:id/refresh` ("Check Square" on the
+checkout screen) pulls payment state directly. Without it a paid cart would sit at
+`pending_payment` forever while the customer waves a Square receipt. `billing::apply_payment`
+is shared by both paths so push and pull can't drift, and is idempotent under
+retry/race (row lock + status guards).
+
+**Reconciliation.** `GET /api/square/reconcile?from=&to=&save=` buckets every sale on
+both sides into matched / amount_mismatch / missing_in_square / missing_locally /
+awaiting_payment, joined on `carts.square_order_id`. Admin → Reconciliation renders
+it; "Run & save" snapshots to `reconciliation_runs`. Window edges are handled so a
+23:59 sale doesn't report as missing on one side and orphaned on the other — see the
+module doc in `routes/reconciliation.rs`.
+
+**Contact sync retargeted.** The `sync_outbox` worker now upserts into **Square
+Customers** (marketing consent → Square's inverse `preferences.email_unsubscribed`).
+Orders no longer flow through the outbox: checkout is synchronous because an operator
+is standing there waiting for a link.
+
+**Frontend.** New `/checkout` view (in nav, plus "Take payment" from Lookup); the
+Admin "Squarespace integration" card replaced by "Square billing" + "Reconciliation" +
+"Recent Square events". Both the checkout screen and the admin panel show a **red
+mock-mode warning** whenever credentials are absent, so nobody mistakes a fake link
+for a real one.
+
+**What is NOT done / next up:**
+- **Nothing has touched real Square.** Follow "Going live on Square" in README.md —
+  sandbox first, test card, confirm reconciliation balances, only then production.
+  Expect the HTTP client to need small corrections; that is what the sandbox pass is
+  for.
+- **The public share-page "Buy" button is still a placeholder.** Checkout today is
+  operator-driven (employee session required). Letting a stranger on `/s/<id>` buy
+  needs a *public, unauthenticated* cart+checkout endpoint with its own abuse
+  questions (rate limiting, no customer record yet, price fixed server-side from the
+  scent rather than trusted from the request). Deliberately not built blind.
+- Portal **Reorder** could route through the same checkout once that public path
+  exists.
 
 ## Not started
-
-All seven planned milestones are complete. What remains is going live for real:
-- Obtain a Squarespace **API key** → set `SQUARESPACE_API_KEY`, restart; the sync
-  layer switches from mock to `HttpSquarespace`. Verify its untested request
-  shapes (see M5 entry).
-- Obtain the real webhook **signing secret** for the subscription → replace the
-  dev value in `.env`; verify the signature header/encoding and `get_order`
-  mapping (see M6 entry). Register the webhook subscription in Squarespace.
 
 ## Security posture (reviewed 2026-07-24)
 

@@ -1,10 +1,21 @@
 # syntax=docker/dockerfile:1
 FROM rust:1-slim-bookworm AS build
 WORKDIR /app
+
+# Build the dependency tree first, against a stub main.rs, so it lands in its own
+# layer keyed only on Cargo.toml/Cargo.lock. Without this split every one-line
+# change to src/ recompiles all ~300 crates in release mode — roughly 30 minutes
+# on this VPS versus about 3 for an incremental app-only rebuild.
 COPY api/Cargo.toml api/Cargo.lock* ./
+RUN mkdir src && echo 'fn main() {}' > src/main.rs \
+    && cargo build --release \
+    && rm -rf src
+
 COPY api/src ./src
 COPY api/migrations ./migrations
-RUN cargo build --release
+# Cargo keys freshness on mtime, and the stub binary from the layer above is
+# newer than the sources just copied in. Touching main.rs forces the real build.
+RUN touch src/main.rs && cargo build --release
 
 FROM debian:bookworm-slim
 # curl for the healthcheck; postgresql-client-16 (from PGDG, matching the PG16

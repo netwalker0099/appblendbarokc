@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod carts;
 pub mod customer_portal;
 pub mod customers;
 pub mod employees;
@@ -7,11 +8,12 @@ pub mod intake;
 pub mod mixes;
 pub mod orders;
 pub mod public;
+pub mod reconciliation;
 pub mod scents;
 pub mod session;
 pub mod settings;
+pub mod square_webhooks;
 pub mod sync;
-pub mod webhooks;
 
 use axum::middleware;
 use axum::routing::{get, patch, post};
@@ -42,9 +44,20 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/orders", get(orders::list))
         .route("/api/orders/:id", get(orders::get).patch(orders::update))
         .route("/api/intake", post(intake::intake))
+        // Carts + Square checkout. Money only ever moves on Square's side; these
+        // routes create the cart, hand it over, and read the result back.
+        .route("/api/carts", get(carts::list).post(carts::create))
+        .route("/api/carts/:id", get(carts::get))
+        .route("/api/carts/:id/checkout", post(carts::checkout))
+        .route("/api/carts/:id/checkout.svg", get(carts::checkout_qr))
+        .route("/api/carts/:id/refresh", post(carts::refresh))
+        .route("/api/carts/:id/cancel", post(carts::cancel))
+        .route("/api/square/status", get(reconciliation::status))
+        .route("/api/square/reconcile", get(reconciliation::reconcile))
+        .route("/api/square/reconcile/history", get(reconciliation::history))
+        .route("/api/square/events", get(square_webhooks::recent))
         .route("/api/sync/status", get(sync::status))
         .route("/api/sync/retry", post(sync::retry))
-        .route("/api/webhooks/recent", get(webhooks::recent))
         .route("/api/admin/backup", get(admin::backup))
         .route("/api/settings", get(settings::get).patch(settings::update))
         .route("/api/employees", get(employees::list).post(employees::create))
@@ -85,8 +98,8 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/api/health", get(crate::health))
-        // Public but HMAC-verified — Squarespace can't present an operator token.
-        .route("/api/webhooks/squarespace", post(webhooks::receive))
+        // Public but HMAC-verified — Square can't present an employee session.
+        .route("/api/webhooks/square", post(square_webhooks::receive))
         .merge(auth_flow)
         .merge(customer_flow)
         .merge(public_routes)

@@ -1,11 +1,12 @@
 mod auth;
+mod billing;
 mod customer_auth;
 mod db;
 mod employee_auth;
 mod error;
 mod models;
 mod routes;
-mod squarespace;
+mod square;
 mod sync;
 
 use axum::Json;
@@ -14,15 +15,21 @@ use sqlx::PgPool;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::squarespace::Squarespace;
+use crate::square::Square;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
-    pub squarespace: Arc<dyn Squarespace>,
-    /// Shared secret for verifying inbound Squarespace webhook signatures. `None`
-    /// disables the webhook receiver (it returns 503 rather than trust anything).
-    pub webhook_secret: Option<Arc<str>>,
+    pub square: Arc<dyn Square>,
+    /// Square's webhook signature key. `None` disables the receiver (it returns
+    /// 503 rather than trust an unverified request that can mark carts paid).
+    pub square_webhook_key: Option<Arc<str>>,
+    /// The notification URL exactly as configured in the Square dashboard.
+    /// Square signs `url || body`, so this must match byte-for-byte. It is
+    /// configured rather than derived from request headers on purpose: `Host` is
+    /// attacker-controlled, and deriving it would let a caller choose the string
+    /// their forged signature was computed over.
+    pub square_webhook_url: Option<Arc<str>>,
 }
 
 #[tokio::main]
@@ -85,25 +92,41 @@ async fn main() {
         .expect("failed to connect to database or run migrations");
     tracing::info!("database connected and migrations applied");
 
-    let webhook_secret: Option<Arc<str>> = std::env::var("SQUARESPACE_WEBHOOK_SECRET")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| Arc::from(s.as_str()));
-    if webhook_secret.is_some() {
-        tracing::info!("squarespace webhook receiver enabled (signing secret present)");
-    } else {
-        tracing::warn!(
-            "SQUARESPACE_WEBHOOK_SECRET unset — webhook receiver disabled (returns 503)"
-        );
+    let env_opt = |key: &str| -> Option<Arc<str>> {
+        std::env::var(key)
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| Arc::from(s.trim()))
+    };
+
+    let square_webhook_key = env_opt("SQUARE_WEBHOOK_SIGNATURE_KEY");
+    let square_webhook_url = env_opt("SQUARE_WEBHOOK_URL");
+
+    // Both halves are required: the key proves the request came from Square, and
+    // the URL is part of the signed message. One without the other cannot verify
+    // anything, so the receiver stays off rather than half-on.
+    match (&square_webhook_key, &square_webhook_url) {
+        (Some(_), Some(url)) => {
+            tracing::info!(%url, "square webhook receiver enabled")
+        }
+        _ => tracing::warn!(
+            have_key = square_webhook_key.is_some(),
+            have_url = square_webhook_url.is_some(),
+            "square webhook receiver disabled (returns 503) — set both \
+             SQUARE_WEBHOOK_SIGNATURE_KEY and SQUARE_WEBHOOK_URL. Until then, \
+             paid carts must be settled with the 'Refresh from Square' action."
+        ),
     }
 
     let state = AppState {
         db,
-        squarespace: squarespace::from_env(),
-        webhook_secret,
+        square: square::from_env(),
+        square_webhook_key,
+        square_webhook_url,
     };
 
-    // Drain the Squarespace outbox in the background for the life of the process.
+    // Push contacts to Square Customers and expire abandoned checkouts, for the
+    // life of the process.
     tokio::spawn(sync::run_worker(state.clone()));
 
     let app = routes::build_router(state);

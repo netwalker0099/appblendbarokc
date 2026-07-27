@@ -20,6 +20,8 @@ hex = "0.4"
 async-trait = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 hmac = "0.12"
+# Square webhook signatures are base64-encoded (the old integration used hex).
+base64 = "0.22"
 argon2 = "0.5"
 totp-rs = { version = "5", features = ["gen_secret", "otpauth", "qr"] }
 qrcode = "0.14"

@@ -1,23 +1,41 @@
-//! The outbox worker: drains `sync_outbox`, pushes each entity through the
-//! configured [`Squarespace`](crate::squarespace::Squarespace) backend, writes
-//! the returned id back onto the entity, and settles the job. Delivery is
-//! at-least-once — a crash between a successful push and its write-back re-runs
-//! the job, so `sync_order` guards against creating a duplicate order.
+//! The outbox worker: drains `sync_outbox`, pushes each customer into Square
+//! Customers, writes the returned id back, and settles the job.
+//!
+//! Only contacts flow through here. Orders used to as well, back when Squarespace
+//! was the sink; under Square they reach the payment processor through cart
+//! checkout instead, which is synchronous because the operator is standing there
+//! waiting for a link. A background outbox is the right shape for "this should
+//! eventually reach the CRM" and the wrong shape for "this customer is waiting
+//! to pay".
+//!
+//! Delivery is at-least-once — a crash between a successful push and its
+//! write-back re-runs the job — so `upsert_customer` must be idempotent on
+//! Square's side, which it is (it searches by email before creating).
+//!
+//! The worker also expires abandoned checkouts on the same loop.
 
 use std::time::Duration;
 
 use uuid::Uuid;
 
 use crate::models::customer::Customer;
-use crate::models::order::{BottleSize, Order, OrderStatus, OrderType};
 use crate::models::sync::{SyncEntity, SyncJob};
-use crate::squarespace::{ContactPush, OrderPush, SyncError};
+use crate::square::{CustomerPush, SquareError};
 use crate::AppState;
 
 /// Give up (mark `failed`) after this many attempts on a retryable error.
 const MAX_ATTEMPTS: i32 = 6;
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
 const BATCH: i64 = 20;
+
+/// A payment link nobody used within this many hours is treated as abandoned.
+/// Long enough that a customer can still pay after leaving the stand; short
+/// enough that their blend isn't held hostage overnight.
+const CHECKOUT_TTL_HOURS: i64 = 24;
+
+/// Sweep for abandoned checkouts every N polls (~10 minutes at a 5s poll). It is
+/// a tidy-up, not a hot path.
+const EXPIRY_EVERY: u32 = 120;
 
 /// Transactionally enqueue a downstream sync. Safe to call repeatedly — a pending
 /// job for the same entity is reused (its retry clock reset to now) rather than
@@ -45,13 +63,28 @@ where
 /// Assumes a single worker (no `for update skip locked`); fine for one API process.
 pub async fn run_worker(state: AppState) {
     tracing::info!(
-        "sync worker started (backend: {})",
-        state.squarespace.name()
+        "sync worker started (square backend: {})",
+        state.square.name()
     );
+    let mut tick: u32 = 0;
     loop {
         if let Err(e) = drain_once(&state).await {
             tracing::error!("sync worker poll failed: {e}");
         }
+
+        if tick % EXPIRY_EVERY == 0 {
+            if let Err(e) = crate::billing::expire_stale_checkouts(
+                &state.db,
+                state.square.as_ref(),
+                CHECKOUT_TTL_HOURS,
+            )
+            .await
+            {
+                tracing::error!("expiring stale checkouts failed: {e}");
+            }
+        }
+        tick = tick.wrapping_add(1);
+
         tokio::time::sleep(POLL_INTERVAL).await;
     }
 }
@@ -78,7 +111,6 @@ async fn drain_once(state: &AppState) -> Result<(), sqlx::Error> {
 async fn process(state: &AppState, job: &SyncJob) -> Result<(), sqlx::Error> {
     let result = match job.entity_type {
         SyncEntity::Contact => sync_contact(state, job.entity_id).await,
-        SyncEntity::Order => sync_order(state, job.entity_id).await,
     };
 
     match result {
@@ -124,98 +156,27 @@ async fn process(state: &AppState, job: &SyncJob) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-async fn sync_contact(state: &AppState, id: Uuid) -> Result<(), SyncError> {
+async fn sync_contact(state: &AppState, id: Uuid) -> Result<(), SquareError> {
     let customer = sqlx::query_as::<_, Customer>("select * from customers where id = $1")
         .bind(id)
         .fetch_optional(&state.db)
         .await
-        .map_err(|e| SyncError::Transport(e.to_string()))?
-        .ok_or_else(|| SyncError::Config(format!("customer {id} no longer exists")))?;
+        .map_err(|e| SquareError::Transport(e.to_string()))?
+        .ok_or_else(|| SquareError::Config(format!("customer {id} no longer exists")))?;
 
-    let push = ContactPush {
+    let push = CustomerPush {
         id: customer.id,
         email: customer.email.clone(),
         name: customer.name.clone(),
         marketing_consent: customer.marketing_consent,
     };
-    let contact_id = state.squarespace.upsert_contact(&push).await?;
+    let square_customer_id = state.square.upsert_customer(&push).await?;
 
-    sqlx::query("update customers set squarespace_contact_id = $1 where id = $2")
-        .bind(&contact_id)
+    sqlx::query("update customers set square_customer_id = $1 where id = $2")
+        .bind(&square_customer_id)
         .bind(id)
         .execute(&state.db)
         .await
-        .map_err(|e| SyncError::Transport(e.to_string()))?;
+        .map_err(|e| SquareError::Transport(e.to_string()))?;
     Ok(())
-}
-
-async fn sync_order(state: &AppState, id: Uuid) -> Result<(), SyncError> {
-    let order = sqlx::query_as::<_, Order>("select * from orders where id = $1")
-        .bind(id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| SyncError::Transport(e.to_string()))?
-        .ok_or_else(|| SyncError::Config(format!("order {id} no longer exists")))?;
-
-    // Order creation is not idempotent on Squarespace's side. If a prior attempt
-    // already got an id back (and only the job write-back failed), don't create a
-    // second order — treat the job as done.
-    if order.squarespace_order_id.is_some() {
-        return Ok(());
-    }
-
-    let customer =
-        sqlx::query_as::<_, Customer>("select * from customers where id = $1")
-            .bind(order.customer_id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| SyncError::Transport(e.to_string()))?
-            .ok_or_else(|| SyncError::Config(format!("customer {} no longer exists", order.customer_id)))?;
-
-    let push = OrderPush {
-        id: order.id,
-        email: customer.email.clone(),
-        name: customer.name.clone(),
-        order_type: order_type_label(order.order_type).to_string(),
-        size: size_label(order.size).to_string(),
-        status: status_label(order.status).to_string(),
-        amount: order.amount,
-        description: format!(
-            "{} ({})",
-            order_type_label(order.order_type),
-            size_label(order.size)
-        ),
-    };
-    let order_id = state.squarespace.create_order(&push).await?;
-
-    sqlx::query("update orders set squarespace_order_id = $1 where id = $2")
-        .bind(&order_id)
-        .bind(id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| SyncError::Transport(e.to_string()))?;
-    Ok(())
-}
-
-fn order_type_label(t: OrderType) -> &'static str {
-    match t {
-        OrderType::SetPerfume => "Set perfume",
-        OrderType::CustomMix => "Custom mix",
-    }
-}
-
-fn size_label(s: BottleSize) -> &'static str {
-    match s {
-        BottleSize::Oz3_4 => "3.4 oz",
-        BottleSize::Oz1_7 => "1.7 oz",
-        BottleSize::Roller => "Roller",
-    }
-}
-
-fn status_label(s: OrderStatus) -> &'static str {
-    match s {
-        OrderStatus::Lead => "lead",
-        OrderStatus::Paid => "paid",
-        OrderStatus::Fulfilled => "fulfilled",
-    }
 }

@@ -24,8 +24,14 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      SQUARESPACE_API_KEY: ${SQUARESPACE_API_KEY}
-      SQUARESPACE_WEBHOOK_SECRET: ${SQUARESPACE_WEBHOOK_SECRET:-}
+      # Square billing. Without a token AND a location id the app runs on its
+      # in-process mock and charges nobody — see .env.example.
+      SQUARE_ENV: ${SQUARE_ENV:-sandbox}
+      SQUARE_ACCESS_TOKEN: ${SQUARE_ACCESS_TOKEN:-}
+      SQUARE_LOCATION_ID: ${SQUARE_LOCATION_ID:-}
+      SQUARE_REDIRECT_URL: ${SQUARE_REDIRECT_URL:-}
+      SQUARE_WEBHOOK_SIGNATURE_KEY: ${SQUARE_WEBHOOK_SIGNATURE_KEY:-}
+      SQUARE_WEBHOOK_URL: ${SQUARE_WEBHOOK_URL:-}
       # TEMPORARY dev bypass for the customer portal (remove when email is wired).
       PORTAL_BYPASS_EMAIL: ${PORTAL_BYPASS_EMAIL:-}
       RUST_LOG: info

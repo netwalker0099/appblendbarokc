@@ -196,9 +196,14 @@ function formatDate(value) {
         </div>
       </div>
 
-      <RouterLink class="primary" :to="{ name: 'intake', query: { customer: selected.id } }">
-        New order for this customer
-      </RouterLink>
+      <div class="row" style="gap: 0.5rem">
+        <RouterLink class="primary" :to="{ name: 'intake', query: { customer: selected.id } }">
+          New order for this customer
+        </RouterLink>
+        <RouterLink class="ghost" :to="{ name: 'checkout', query: { customer: selected.id } }">
+          Take payment
+        </RouterLink>
+      </div>
     </template>
   </template>
 </template>

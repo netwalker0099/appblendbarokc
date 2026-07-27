@@ -316,6 +316,21 @@ button:focus-visible {
   color: var(--ok);
 }
 
+/* Reconciliation discrepancies, and the "not actually charging cards" warning —
+   these need to be impossible to skim past. */
+.badge.danger-badge {
+  background: color-mix(in srgb, var(--danger) 18%, var(--surface));
+  color: var(--danger);
+}
+
+.ok-text {
+  color: var(--ok);
+}
+
+.recon-summary {
+  font-weight: 600;
+}
+
 /* Deactivated catalog rows read as dimmed but still legible. */
 .list-item.inactive {
   opacity: 0.6;

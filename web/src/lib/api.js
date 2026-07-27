@@ -66,7 +66,31 @@ export const api = {
   updateSettings: (patch) => request('/settings', { method: 'PATCH', body: patch }),
   getSyncStatus: () => request('/sync/status'),
   retrySync: () => request('/sync/retry', { method: 'POST' }),
-  listWebhooks: () => request('/webhooks/recent'),
+
+  // --- carts + Square checkout ---
+  // A cart is one checkout: the unit that becomes a single Square order and a
+  // single payment. Money only ever moves on Square's hosted page.
+  listCarts: (customerId) =>
+    request(customerId ? `/carts?customer_id=${encodeURIComponent(customerId)}` : '/carts'),
+  getCart: (id) => request(`/carts/${id}`),
+  createCart: (body) => request('/carts', { method: 'POST', body }),
+  checkoutCart: (id) => request(`/carts/${id}/checkout`, { method: 'POST' }),
+  // Pull this cart's state from Square — the backstop for a missed webhook.
+  refreshCart: (id) => request(`/carts/${id}/refresh`, { method: 'POST' }),
+  cancelCart: (id) => request(`/carts/${id}/cancel`, { method: 'POST' }),
+
+  // --- Square integration (admin) ---
+  getSquareStatus: () => request('/square/status'),
+  reconcile: ({ from, to, save = false } = {}) => {
+    const q = new URLSearchParams()
+    if (from) q.set('from', from)
+    if (to) q.set('to', to)
+    if (save) q.set('save', 'true')
+    const qs = q.toString()
+    return request(`/square/reconcile${qs ? `?${qs}` : ''}`)
+  },
+  reconcileHistory: () => request('/square/reconcile/history'),
+  listSquareEvents: () => request('/square/events'),
   listCustomers: (email) =>
     request(email ? `/customers?email=${encodeURIComponent(email)}` : '/customers'),
   getCustomer: (id) => request(`/customers/${id}`),
@@ -74,8 +98,13 @@ export const api = {
   // One round trip for the lookup view: customer + mixes-with-items + orders.
   getReorder: (id) => request(`/customers/${id}/reorder`),
   getMix: (id) => request(`/mixes/${id}`),
-  listOrders: (customerId) =>
-    request(customerId ? `/orders?customer_id=${encodeURIComponent(customerId)}` : '/orders'),
+  listOrders: (customerId, { uncarted = false } = {}) => {
+    const q = new URLSearchParams()
+    if (customerId) q.set('customer_id', customerId)
+    if (uncarted) q.set('uncarted', 'true')
+    const qs = q.toString()
+    return request(`/orders${qs ? `?${qs}` : ''}`)
+  },
   submitIntake: (body, idempotencyKey) =>
     request('/intake', {
       method: 'POST',

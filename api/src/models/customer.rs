@@ -9,6 +9,6 @@ pub struct Customer {
     pub name: Option<String>,
     pub marketing_consent: bool,
     pub marketing_consent_at: Option<DateTime<Utc>>,
-    pub squarespace_contact_id: Option<String>,
+    pub square_customer_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }

@@ -287,8 +287,7 @@ pub async fn reorder(
     .fetch_one(&state.db)
     .await?;
 
-    // Mirror it downstream like any other order.
-    crate::sync::enqueue(&state.db, crate::models::sync::SyncEntity::Order, order.id).await?;
-
+    // No downstream push: a reorder is a 'lead' until staff cart it and take
+    // payment through Square.
     Ok(Json(order))
 }

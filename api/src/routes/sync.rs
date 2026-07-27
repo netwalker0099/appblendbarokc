@@ -7,8 +7,9 @@ use crate::error::AppError;
 use crate::models::sync::SyncJob;
 use crate::AppState;
 
-/// Observability for the outbox: which backend is active, how many jobs sit in
-/// each state, and the most recent permanent failures (for debugging a bad push).
+/// Observability for the contact outbox: how many jobs sit in each state, and
+/// the most recent permanent failures. Billing/reconciliation status lives
+/// separately at `/api/square/status`.
 pub async fn status(
     _admin: AdminEmployee,
     State(state): State<AppState>,
@@ -34,8 +35,7 @@ pub async fn status(
     .await?;
 
     Ok(Json(json!({
-        "backend": state.squarespace.name(),
-        "webhook_receiver_enabled": state.webhook_secret.is_some(),
+        "backend": state.square.name(),
         "counts": counts,
         "recent_failures": recent_failures,
     })))

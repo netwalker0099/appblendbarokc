@@ -5,9 +5,10 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, sqlx::Type)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
+/// What the outbox pushes. Contacts only: orders reach Square through the
+/// synchronous cart-checkout path, not this worker.
 pub enum SyncEntity {
     Contact,
-    Order,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, sqlx::Type)]

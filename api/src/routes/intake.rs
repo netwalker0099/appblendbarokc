@@ -209,10 +209,13 @@ pub async fn intake(
     .fetch_one(&mut *tx)
     .await?;
 
-    // Enqueue the downstream Squarespace pushes in the same transaction as the
-    // writes they mirror, so a crash can't leave the DB updated but the sync lost.
+    // Enqueue the contact push in the same transaction as the write it mirrors,
+    // so a crash can't leave the DB updated but the sync lost.
+    //
+    // The order is deliberately not pushed anywhere here. Nothing is owed until
+    // it goes into a cart and that cart is checked out — a separate, explicit
+    // operator action. Intake records intent; checkout moves money.
     crate::sync::enqueue(&mut *tx, SyncEntity::Contact, customer.id).await?;
-    crate::sync::enqueue(&mut *tx, SyncEntity::Order, order.id).await?;
 
     tx.commit().await?;
 

@@ -36,6 +36,25 @@ pub enum BottleSize {
     Roller,
 }
 
+impl OrderType {
+    pub fn label(&self) -> &'static str {
+        match self {
+            OrderType::SetPerfume => "Set perfume",
+            OrderType::CustomMix => "Custom mix",
+        }
+    }
+}
+
+impl BottleSize {
+    pub fn label(&self) -> &'static str {
+        match self {
+            BottleSize::Oz3_4 => "3.4 oz",
+            BottleSize::Oz1_7 => "1.7 oz",
+            BottleSize::Roller => "Roller",
+        }
+    }
+}
+
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct Order {
     pub id: Uuid,
@@ -46,7 +65,6 @@ pub struct Order {
     pub mix_id: Option<Uuid>,
     pub scent_id: Option<Uuid>,
     pub status: OrderStatus,
-    pub squarespace_order_id: Option<String>,
     pub external_ref: Option<String>,
     pub amount: Option<Decimal>,
     pub idempotency_key: Option<String>,
