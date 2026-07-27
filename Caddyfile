@@ -26,6 +26,24 @@
 	handle {
 		root * /usr/share/caddy
 		try_files {path} /index.html
+
+		# Cache policy, split by whether a filename identifies its own contents.
+		#
+		# Vite fingerprints everything under /assets (index-<hash>.js), so those
+		# can be kept forever — a new build produces a new name.
+		#
+		# index.html is NOT fingerprinted: it is the file that says which bundle
+		# to load. Served with no Cache-Control at all, browsers fall back to
+		# heuristic freshness and can hold a stale copy for days, so a user keeps
+		# running the previous build after a deploy and sees none of the changes.
+		# That is exactly what happened on 2026-07-27. `no-cache` still permits
+		# caching, it only forces revalidation — the cost is one 304 per load.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		@notassets not path /assets/*
+		header @notassets Cache-Control "no-cache"
+
 		file_server
 	}
 
@@ -54,6 +72,16 @@ sandbox.theblendbarokc.com {
 		# {path}/index.html serves /portal (portal/index.html); {path}.html serves
 		# /portal/verify (portal/verify.html).
 		try_files {path} {path}.html {path}/index.html /index.html
+
+		# This site is hand-written, so only the images carry stable names —
+		# styles.css, share.js and portal/app.js are edited in place and MUST
+		# revalidate, or a fix ships and returning visitors never see it.
+		@img path /assets/*
+		header @img Cache-Control "public, max-age=604800"
+
+		@code not path /assets/*
+		header @code Cache-Control "no-cache"
+
 		file_server
 	}
 
