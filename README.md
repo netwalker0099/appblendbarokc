@@ -6,6 +6,9 @@ Square's hosted checkout, so no card ever touches this app — while this app's 
 Postgres remains the source of truth for customers, preferences, mixes, and orders.
 The two are reconciled on demand; see [Square billing](#square-billing).
 
+> For a non-technical summary of status, risks, and what's needed to start taking
+> payments, see **[EXECUTIVE_BRIEF.md](EXECUTIVE_BRIEF.md)**.
+
 ## Services
 
 - `db` — Postgres 16, persisted in the `pgdata` volume.
