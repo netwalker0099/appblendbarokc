@@ -20,7 +20,7 @@
   /* Shown whenever checkout can't proceed. Never leave a buyer at a dead end —
      always give them a way to reach the bar. */
   const unavailable = (msg) =>
-    `<div class="portal-note">${msg} Visit us at the bar or message
+    `<div class="portal-note">${msg} Message
      <a href="https://www.instagram.com/theblendbar.okc" rel="noopener">@theblendbar.okc</a> to order.</div>`
 
   function render(s) {
@@ -41,7 +41,7 @@
 
     view.innerHTML = `<div class="share-card">
       <img class="share-mark" src="/assets/img1.webp" alt="" />
-      <p class="eyebrow">A signature scent · shared with you</p>
+      <p class="eyebrow">Shared with you</p>
       <h1>${esc(s.name)}</h1>
       ${notes ? `<p class="notes-label">Notes</p><div class="notes">${notes}</div>` : ''}
       ${sizeRows ? `<div class="sizes">${sizeRows}</div>` : ''}
@@ -62,13 +62,13 @@
                  Buy this scent
                </button>
                <p class="muted buy-note">
-                 You&rsquo;ll pay securely on Square. Each blend is made by hand &mdash;
-                 we&rsquo;ll email you when it&rsquo;s ready.
+                 Pay securely on Square. Blends are made by hand &mdash; we&rsquo;ll
+                 email you when yours is ready.
                </p>
              </form>`
           : unavailable('This scent isn&rsquo;t available to buy online right now.')
       }
-      <p class="muted share-foot">Bespoke perfumery in Oklahoma City.</p>
+      <p class="muted share-foot">The Blend Bar &middot; Oklahoma City</p>
     </div>`
 
     const form = document.getElementById('buyForm')

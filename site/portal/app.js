@@ -32,7 +32,7 @@
         <img src="/assets/img1.webp" alt="" />
         <p class="eyebrow">Customer Portal</p>
         <h1>Reorder your signature</h1>
-        <p>Enter your email and we'll send you a secure sign-in link — no password to remember.</p>
+        <p>Enter your email and we'll send you a sign-in link.</p>
         <form id="loginForm" novalidate>
           <input id="email" class="portal-input" type="email" placeholder="you@example.com" autocomplete="email" required />
           <button class="btn solid" type="submit" id="loginBtn">Send sign-in link</button>
@@ -65,7 +65,7 @@
         <img src="/assets/img1.webp" alt="" />
         <p class="eyebrow">Check your email</p>
         <h1>Link on the way</h1>
-        <p>If <strong>${esc(email)}</strong> is in our system, we've sent a secure sign-in link. It expires in 15 minutes.</p>
+        <p>If <strong>${esc(email)}</strong> is on file, a sign-in link is on its way. It expires in 15 minutes.</p>
         <p class="muted">Didn't get it? Check spam, or <a href="/portal">try again</a>.</p>
       </div>`
   }
@@ -151,9 +151,9 @@
     btn.textContent = 'Placing…'
     try {
       await api('/reorder', { method: 'POST', body })
-      flash("Reorder placed — our team will have it ready. See you at the bar!", false)
+      flash("Reorder placed. We'll have it ready for you.", false)
     } catch {
-      flash("Sorry, that didn't go through. Please try again.", true)
+      flash("That didn't go through. Please try again.", true)
     } finally {
       btn.disabled = false
       btn.textContent = 'Reorder'
