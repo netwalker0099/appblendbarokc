@@ -1,6 +1,6 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import BundleManager from '../components/BundleManager.vue'
 import CatalogManager from '../components/CatalogManager.vue'
@@ -12,6 +12,61 @@ import { api, downloadBackup } from '../lib/api.js'
 import { currentUser } from '../lib/auth.js'
 
 const router = useRouter()
+const route = useRoute()
+
+/**
+ * Admin had grown to ten stacked cards and a very long scroll. Grouping them
+ * into tabs keeps one job on screen at a time.
+ *
+ * The active tab lives in the URL (`/admin?tab=billing`) rather than in
+ * component state, so a refresh returns you where you were and a tab can be
+ * linked to directly — which matters when telling someone "check Admin →
+ * Billing".
+ */
+const TABS = [
+  { id: 'catalog', label: 'Catalog' },
+  { id: 'pricing', label: 'Pricing & packages' },
+  { id: 'team', label: 'Team' },
+  { id: 'billing', label: 'Billing' },
+  { id: 'alerts', label: 'Notifications' },
+  { id: 'data', label: 'Data' },
+]
+
+const activeTab = ref(TABS.some((t) => t.id === route.query.tab) ? route.query.tab : TABS[0].id)
+
+watch(activeTab, (tab) => {
+  // replace, not push: flicking through tabs shouldn't fill the back button.
+  router.replace({ name: 'admin', query: { ...route.query, tab } })
+})
+
+function selectTab(id) {
+  activeTab.value = id
+}
+
+/** Arrow-key movement across the tab strip, as a tablist is expected to do. */
+function onTabKey(event, index) {
+  const keys = { ArrowRight: 1, ArrowLeft: -1 }
+  if (event.key in keys) {
+    event.preventDefault()
+    const next = (index + keys[event.key] + TABS.length) % TABS.length
+    activeTab.value = TABS[next].id
+    document.getElementById(`tab-${TABS[next].id}`)?.focus()
+  } else if (event.key === 'Home' || event.key === 'End') {
+    event.preventDefault()
+    const target = event.key === 'Home' ? TABS[0] : TABS[TABS.length - 1]
+    activeTab.value = target.id
+    document.getElementById(`tab-${target.id}`)?.focus()
+  }
+}
+
+/// A dot on a tab that wants attention, so a problem isn't hidden by the very
+/// grouping that tidied the page up.
+const tabAlert = computed(() => ({
+  // Not being connected to Square means no money can be taken at all; failed
+  // contact syncs rot silently. Both are fixed from the Billing tab, so the dot
+  // points at the tab that holds the control.
+  billing: Boolean(square.value && !square.value.live) || failedCount.value > 0,
+}))
 
 const ingredients = ref([])
 const scents = ref([])
@@ -270,24 +325,58 @@ function formatTime(value) {
   <p class="muted" v-if="loading">Loading…</p>
 
   <template v-else>
-    <CatalogManager
-      title="Ingredients"
-      noun="ingredient"
-      :items="ingredients"
-      :types="INGREDIENT_TYPES"
-      @add="addIngredient"
-      @toggle="toggleIngredient"
-      @set-type="setIngredientType"
-    />
+    <div class="tabstrip" role="tablist" aria-label="Admin sections">
+      <button
+        v-for="(tab, i) in TABS"
+        :id="`tab-${tab.id}`"
+        :key="tab.id"
+        role="tab"
+        type="button"
+        :aria-selected="activeTab === tab.id"
+        :aria-controls="`panel-${tab.id}`"
+        :tabindex="activeTab === tab.id ? 0 : -1"
+        :class="{ active: activeTab === tab.id }"
+        @click="selectTab(tab.id)"
+        @keydown="onTabKey($event, i)"
+      >
+        {{ tab.label }}
+        <span class="dot" v-if="tabAlert[tab.id]" aria-label="needs attention"></span>
+      </button>
+    </div>
 
-    <ScentManager
-      :scents="scents"
-      :ingredients="ingredients"
-      @add="addScent"
-      @toggle="toggleScent"
-      @save="saveScentFormula"
-    />
+    <!-- Panels use v-show, not v-if: switching tabs to check something must not
+         throw away a half-finished formula or package on another tab. -->
+    <section
+      id="panel-catalog"
+      role="tabpanel"
+      aria-labelledby="tab-catalog"
+      v-show="activeTab === 'catalog'"
+    >
+      <CatalogManager
+        title="Ingredients"
+        noun="ingredient"
+        :items="ingredients"
+        :types="INGREDIENT_TYPES"
+        @add="addIngredient"
+        @toggle="toggleIngredient"
+        @set-type="setIngredientType"
+      />
 
+      <ScentManager
+        :scents="scents"
+        :ingredients="ingredients"
+        @add="addScent"
+        @toggle="toggleScent"
+        @save="saveScentFormula"
+      />
+    </section>
+
+    <section
+      id="panel-pricing"
+      role="tabpanel"
+      aria-labelledby="tab-pricing"
+      v-show="activeTab === 'pricing'"
+    >
     <div class="card">
       <h2>Custom blend pricing</h2>
       <p class="muted">Retail price per size for bespoke custom blends — applies to every custom blend.</p>
@@ -314,12 +403,28 @@ function formatTime(value) {
       </button>
     </div>
 
-    <TeamManager
-      :employees="employees"
-      :current-email="currentUser?.email || ''"
-      @changed="reloadTeam"
-    />
+      <BundleManager :bundles="bundles" :scents="scents" @changed="reloadBundles" />
+    </section>
 
+    <section
+      id="panel-team"
+      role="tabpanel"
+      aria-labelledby="tab-team"
+      v-show="activeTab === 'team'"
+    >
+      <TeamManager
+        :employees="employees"
+        :current-email="currentUser?.email || ''"
+        @changed="reloadTeam"
+      />
+    </section>
+
+    <section
+      id="panel-billing"
+      role="tabpanel"
+      aria-labelledby="tab-billing"
+      v-show="activeTab === 'billing'"
+    >
     <div class="card">
       <h2>Square billing</h2>
 
@@ -554,10 +659,6 @@ function formatTime(value) {
       </template>
     </div>
 
-    <BundleManager :bundles="bundles" :scents="scents" @changed="reloadBundles" />
-
-    <NotificationManager :targets="notificationTargets" @changed="reloadNotifications" />
-
     <div class="card">
       <h2>Recent Square events</h2>
       <p class="muted" v-if="!squareEvents.length">
@@ -578,7 +679,23 @@ function formatTime(value) {
         </span>
       </div>
     </div>
+    </section>
 
+    <section
+      id="panel-alerts"
+      role="tabpanel"
+      aria-labelledby="tab-alerts"
+      v-show="activeTab === 'alerts'"
+    >
+      <NotificationManager :targets="notificationTargets" @changed="reloadNotifications" />
+    </section>
+
+    <section
+      id="panel-data"
+      role="tabpanel"
+      aria-labelledby="tab-data"
+      v-show="activeTab === 'data'"
+    >
     <div class="card">
       <h2>Backup</h2>
       <p class="muted">
@@ -590,5 +707,75 @@ function formatTime(value) {
         {{ backingUp ? 'Preparing…' : 'Download database backup' }}
       </button>
     </div>
+    </section>
   </template>
 </template>
+
+<style scoped>
+/* Sticky so the tabs stay reachable inside a long panel — Reconciliation in
+   particular can run to several screens. */
+.tabstrip {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+  padding: 0.5rem 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  /* On a tablet the six tabs won't fit; scroll them rather than wrap into a
+     block that pushes the content down. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabstrip::-webkit-scrollbar {
+  display: none;
+}
+
+.tabstrip button {
+  flex: none;
+  position: relative;
+  padding: 0.6rem 0.95rem;
+  min-height: var(--tap);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tabstrip button:hover {
+  color: var(--ink);
+  background: var(--surface-alt);
+}
+
+.tabstrip button.active {
+  color: var(--accent-deep);
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.tabstrip button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* A problem must not be hidden by the grouping that tidied the page up. */
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 0.4rem;
+  border-radius: 50%;
+  background: var(--danger);
+  vertical-align: middle;
+}
+</style>
