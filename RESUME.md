@@ -645,6 +645,61 @@ came back 404 "Unknown Webhook"** — a real response from Discord, so the outbo
 transport, TLS and payload are proven; only a valid webhook URL is missing.
 Unlike Square, this integration *has* touched its real third party.
 
+## Milestone 13: email (2026-07-27)
+
+The app had never sent an email. Portal sign-in links were logged rather than
+mailed, which is the only reason `PORTAL_BYPASS_EMAIL` existed, and the
+online-order thank-you page promised "we'll email you when it's ready" with
+nothing behind it.
+
+**Two transports behind a `Mailer` trait**, picked in order:
+
+1. **Gmail API + service account with domain-wide delegation** (preferred).
+   Signs an RS256 JWT asserting "I am this service account, acting as
+   <mailbox>, scope gmail.send", exchanges it for a 1-hour access token
+   (cached, refreshed a minute early), and POSTs a base64url RFC-5322 message
+   to `users/me/messages/send`.
+2. **Workspace SMTP relay** (`smtp-relay.gmail.com:587`, TLS *required*, not
+   opportunistic). IP-allowlisted needs no credentials at all.
+3. Mock that logs.
+
+**Why a service account and not 3-legged OAuth** — the owner asked about this
+after reading a Targetprocess guide, which describes a *different* shape: a
+plugin reading a mailbox, authenticating as a user via consent. For unattended
+outbound mail a user refresh token can be revoked or lapse, and when it does the
+sign-in links stop and customers are locked out of the portal with no human
+awake to re-consent. A service account has no such moment.
+
+**Correction to an earlier claim:** the first version of this work said the
+Gmail API route would need a CASA assessment. That was wrong for this
+deployment. `gmail.send` is a *sensitive* scope, not *restricted*, and Google
+requires no verification or CASA for an app used only inside its own Workspace.
+The README overstated the barrier and has been fixed.
+
+**Design decisions:**
+- **No message body is ever persisted.** `email_deliveries` is metadata only: a
+  sign-in mail carries a token that grants a customer session, already stored
+  hashed in `customer_login_tokens`, and writing the rendered body would put a
+  working credential at rest in a second place. Queued mail re-renders from ids.
+- **Sign-in links send inline; order-ready queues.** Someone is watching a
+  "check your email" screen and the token expires in minutes.
+- `POST /api/customer/login` answers identically for known and unknown
+  addresses, including on send failure, so it cannot enumerate customers.
+- Plain text *and* HTML on every message; a link that only renders in HTML fails
+  for anyone whose client blocks it.
+- One "ready" email per order (partial unique index).
+- The service-account key is mounted read-only from a host path rather than
+  passed as an env var, keeping it out of `docker inspect`.
+
+**Admin → Email tab:** sender identity, order-ready toggle, test send, delivery
+log. Transport host and credentials are never settable or readable there.
+
+**Verified:** 70 unit tests (16 new, incl. the Gmail message encoding round-trip
+and base64url correctness) and 13 live checks. **Not yet exercised against real
+Google credentials** — no service account exists yet.
+
+**Still open:** remove `PORTAL_BYPASS_EMAIL` once a transport is live.
+
 ## Not started
 
 ## Security posture (reviewed 2026-07-24)

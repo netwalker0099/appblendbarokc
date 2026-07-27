@@ -234,7 +234,7 @@ state directly; that button is also the recovery path for a webhook lost to a de
 - `GET /api/square/status` — backend, live-vs-mock, webhook state, cart counts.
 - `GET /api/square/events` — recent inbound webhooks, for debugging.
 
-## Email (Google Workspace SMTP relay)
+## Email (Google Workspace)
 
 Two messages leave the app:
 
@@ -248,43 +248,71 @@ order-ready toggle, a test-send button, and a log of what was sent. Relay host a
 credentials are **not** settable there — they live in the server environment, like
 every other secret in this app.
 
-### Why the relay, and not the alternatives
+### Two transports, picked in order
 
-Google has spent several years closing the easy doors, so the choice is narrower
-than it looks:
+**1. Gmail API with a service account (preferred).** Set `GOOGLE_SA_KEY_FILE` and
+`GOOGLE_IMPERSONATE`.
 
-- **Basic SMTP username/password** — being disabled; not an option.
-- **App passwords** — still work, but Google's own docs call them "not
-  recommended". They cannot be scoped, and anyone holding the 16 characters has
-  full send rights on that mailbox.
-- **Gmail API + service account with domain-wide delegation** — supported, but it
-  means a private key on disk, token refresh, multi-party admin approval for the
-  delegation, and a CASA security assessment if restricted scopes are involved.
-- **`smtp-relay.gmail.com`** — Google's documented path for exactly this shape: an
-  application on a server sending as a Workspace domain. Authorised by **IP
-  allowlist**, which this deployment can satisfy because it is one VPS with a
-  fixed address — so there are **no credentials on the box at all**.
+**2. Workspace SMTP relay.** Set `SMTP_HOST`.
 
-The relay wins on this deployment. Everything goes through a `Mailer` trait, so
-swapping in the Gmail API later touches one file and no callers.
+**3. Otherwise a mock** that logs instead of sending.
 
-### Setting it up
+Both are OAuth-era mechanisms; the older options are closed off. Basic
+username/password SMTP is being disabled. App passwords still work but Google's
+own docs call them "not recommended" — they cannot be scoped, and the 16
+characters grant full send rights on the mailbox.
+
+The Gmail API is preferred because it does not depend on the server's IP address,
+it sends as a real mailbox (so messages appear in that account's **Sent** folder),
+and nothing expires. A *service account* is used rather than three-legged user
+consent deliberately: a user refresh token can be revoked or lapse, and when it
+does, mail stops until a human signs in again — for sign-in links, which are the
+only way into the customer portal, that failure arrives at 2am and locks customers
+out. A service account has no such moment.
+
+> **Note on Google verification:** the only scope requested is `gmail.send`, which
+> is *sensitive*, not *restricted* — it cannot read a single message. And for an
+> app used only inside its own Workspace, Google requires **no verification and no
+> CASA assessment** at all. Earlier revisions of this README overstated that
+> barrier.
+
+#### Setting up the Gmail API (preferred)
+
+1. Google Cloud console → new project → **enable the Gmail API** → create a
+   **service account** → download a JSON key.
+2. Google Admin → **Security → Access and data control → API controls →
+   Domain-wide delegation → Add new**:
+   - Client ID: the service account's numeric client ID
+   - Scopes: `https://www.googleapis.com/auth/gmail.send`
+3. Put the key outside the repo, set `GOOGLE_SA_KEY_HOST_PATH` (host path, mounted
+   read-only into the container) and `GOOGLE_IMPERSONATE` to the mailbox to send
+   as. Restart the API.
+4. Set a **From address** in Admin → Email and press **Send test**.
+
+The From address should be the impersonated mailbox, or one of its verified
+"send mail as" aliases — Gmail rejects or rewrites anything else.
+
+A file path is preferred over `GOOGLE_SA_KEY_JSON` because it keeps the private
+key out of the process environment, where it would show up in `docker inspect`.
+
+#### Setting up the SMTP relay (alternative)
 
 1. Google Admin → **Apps → Google Workspace → Gmail → Routing → SMTP relay service**.
 2. Allowed senders: **Only addresses in my domains**.
 3. Authentication: tick **Only accept mail from the specified IP addresses** and
    add this server's public IP.
 4. Encryption: tick **Require TLS encryption**.
-5. Set `SMTP_HOST=smtp-relay.gmail.com` and `SMTP_PORT=587` in `.env`, restart the
-   API, then set a **From address** in Admin → Email and press **Send test**.
+5. Set `SMTP_HOST=smtp-relay.gmail.com` and `SMTP_PORT=587`, restart, then set a
+   From address and send a test.
 
-The From address must be a mailbox on the Workspace domain — the relay refuses to
-send as a domain it does not own. Check SPF/DKIM/DMARC are in place for the domain
-or messages will land in spam.
+With IP allowlisting there are no credentials to store at all — the trade is that
+it breaks if the server's address changes, and relay mail does not appear in a
+Sent folder. If you also enable "Require SMTP Authentication", set
+`SMTP_USERNAME` and `SMTP_PASSWORD` together; the app refuses a half-configured
+login rather than silently falling back to an unauthenticated connection.
 
-If you additionally enable "Require SMTP Authentication", set `SMTP_USERNAME` and
-`SMTP_PASSWORD` together; the app refuses to start a half-configured login rather
-than falling back to an unauthenticated connection.
+Either way the From address must be a mailbox on the Workspace domain, and
+SPF/DKIM/DMARC should be in place for the domain or messages will land in spam.
 
 ### Design notes
 

@@ -24,6 +24,7 @@
 //! a box with no credentials.
 
 pub mod dispatch;
+pub mod gmail;
 pub mod templates;
 
 use std::sync::Arc;
@@ -216,11 +217,50 @@ impl Mailer for MockMailer {
 
 /// Build the mailer from the environment.
 ///
-/// Only the host is strictly required: the Workspace relay authorises by IP, so
-/// a deployment with an allowlisted address needs no username or password. A
-/// username without a password (or vice versa) is a misconfiguration and is
-/// refused rather than silently ignored.
+/// Order of preference:
+///
+/// 1. **Gmail API** with a service account, when a key and a mailbox to
+///    impersonate are both present. Preferred because it does not depend on the
+///    server's IP address, sends as a real mailbox (so the message appears in
+///    that account's Sent folder), and has nothing that expires.
+/// 2. **SMTP relay**, when `SMTP_HOST` is set.
+/// 3. **Mock**, which logs instead of sending.
+///
+/// A half-configured backend is never silently downgraded to the next one
+/// without saying so — a misconfiguration that quietly falls back to "logs
+/// nothing to anyone" is how a business discovers its email is off by hearing
+/// about it from a customer.
 pub fn from_env() -> Arc<dyn Mailer> {
+    if let Some(loaded) = gmail::load_service_account() {
+        let impersonate = std::env::var("GOOGLE_IMPERSONATE")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        match (loaded, impersonate) {
+            (Ok(account), Some(mailbox)) => {
+                let client_email = account.client_email.clone();
+                match gmail::GmailMailer::new(account, mailbox.clone()) {
+                    Ok(mailer) => {
+                        tracing::info!(
+                            service_account = %client_email,
+                            sending_as = %mailbox,
+                            "email: Gmail API via service account (domain-wide delegation)"
+                        );
+                        return Arc::new(mailer);
+                    }
+                    Err(e) => tracing::error!("email: Gmail service account unusable ({e})"),
+                }
+            }
+            (Ok(_), None) => tracing::error!(
+                "email: a Google service-account key is present but GOOGLE_IMPERSONATE \
+                 is unset. Set it to the Workspace mailbox the app should send as — \
+                 the key alone cannot send, because a service account has no inbox."
+            ),
+            (Err(e), _) => tracing::error!("email: {e}"),
+        }
+    }
+
     let host = std::env::var("SMTP_HOST")
         .ok()
         .map(|s| s.trim().to_string())
@@ -228,8 +268,10 @@ pub fn from_env() -> Arc<dyn Mailer> {
 
     let Some(host) = host else {
         tracing::warn!(
-            "SMTP_HOST unset — using the mock mailer. Sign-in links will be written \
-             to this log instead of emailed, and no customer will receive anything."
+            "No email transport configured — using the mock mailer. Set either \
+             GOOGLE_SA_KEY_FILE + GOOGLE_IMPERSONATE (Gmail API, preferred) or \
+             SMTP_HOST (Workspace relay). Until then sign-in links are written to \
+             this log instead of emailed, and no customer receives anything."
         );
         return Arc::new(MockMailer);
     };
