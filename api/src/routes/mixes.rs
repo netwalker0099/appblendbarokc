@@ -74,7 +74,21 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateMixRequest>,
 ) -> Result<Json<MixDetail>, AppError> {
+    // A blend nobody named is one nobody can find again — it has to survive in
+    // the customer's history and the reorder list. A blank name is rejected
+    // rather than coalesced away, which would silently keep the old one.
+    if let Some(name) = &body.name {
+        if name.trim().is_empty() {
+            return Err(AppError::BadRequest("a blend needs a name".into()));
+        }
+    }
+
     if let Some(items) = &body.items {
+        if items.is_empty() {
+            return Err(AppError::BadRequest(
+                "a blend needs at least one ingredient".into(),
+            ));
+        }
         let ids: Vec<Uuid> = items.iter().map(|i| i.ingredient_id).collect();
         assert_active_ingredients(&state.db, &ids).await?;
         for item in items {

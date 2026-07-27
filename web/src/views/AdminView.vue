@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import BundleManager from '../components/BundleManager.vue'
 import CatalogManager from '../components/CatalogManager.vue'
 import NotificationManager from '../components/NotificationManager.vue'
 import ScentManager from '../components/ScentManager.vue'
@@ -19,6 +20,7 @@ const sync = ref(null)
 const square = ref(null)
 const squareEvents = ref([])
 const notificationTargets = ref([])
+const bundles = ref([])
 const report = ref(null)
 const reconciling = ref(false)
 // Default the reconciliation window to the last 7 days, as YYYY-MM-DD.
@@ -48,7 +50,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [ing, sc, emp, set, st, sq, ev, nt] = await Promise.all([
+    const [ing, sc, emp, set, st, sq, ev, nt, bd] = await Promise.all([
       api.listIngredients(),
       api.listScents(),
       api.listEmployees(),
@@ -57,8 +59,10 @@ async function load() {
       api.getSquareStatus(),
       api.listSquareEvents(),
       api.listNotificationTargets(),
+      api.listBundles(),
     ])
     notificationTargets.value = nt
+    bundles.value = bd
     ingredients.value = ing
     scents.value = sc
     employees.value = emp
@@ -78,6 +82,14 @@ async function load() {
 function handle(err) {
   error.value = err.message
   if (err.status === 401) router.push({ name: 'login' })
+}
+
+async function reloadBundles() {
+  try {
+    bundles.value = await api.listBundles()
+  } catch (err) {
+    handle(err)
+  }
 }
 
 async function reloadNotifications() {
@@ -541,6 +553,8 @@ function formatTime(value) {
         </p>
       </template>
     </div>
+
+    <BundleManager :bundles="bundles" :scents="scents" @changed="reloadBundles" />
 
     <NotificationManager :targets="notificationTargets" @changed="reloadNotifications" />
 

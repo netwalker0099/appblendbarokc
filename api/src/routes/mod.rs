@@ -1,5 +1,7 @@
 pub mod admin;
+pub mod bundles;
 pub mod carts;
+pub mod deletions;
 pub mod customer_portal;
 pub mod customers;
 pub mod employees;
@@ -45,6 +47,21 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/orders", get(orders::list))
         .route("/api/orders/:id", get(orders::get).patch(orders::update))
         .route("/api/intake", post(intake::intake))
+        // Package deals: any employee can read them (intake needs the list),
+        // admins define them.
+        .route("/api/bundles", get(bundles::list).post(bundles::create))
+        .route(
+            "/api/bundles/:id",
+            patch(bundles::update).delete(bundles::delete),
+        )
+        // Admin deletion. Everything here refuses to remove anything money has
+        // touched — see the module docs.
+        .route("/api/customers/:id/deletion-impact", get(deletions::customer_impact))
+        .route("/api/customers/:id/delete", post(deletions::delete_customer))
+        .route("/api/mixes/:id/delete", post(deletions::delete_mix))
+        .route("/api/orders/:id/delete", post(deletions::delete_order))
+        .route("/api/ingredients/:id/delete", post(deletions::delete_ingredient))
+        .route("/api/scents/:id/delete", post(deletions::delete_scent))
         // Carts + Square checkout. Money only ever moves on Square's side; these
         // routes create the cart, hand it over, and read the result back.
         .route("/api/carts", get(carts::list).post(carts::create))

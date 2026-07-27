@@ -1,8 +1,10 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 
+import MixBuilder from '../components/MixBuilder.vue'
 import { api } from '../lib/api.js'
 import { bottleLabel, formatMl, totalMl } from '../lib/bottle.js'
+import { isAdmin } from '../lib/auth.js'
 
 const query = ref('')
 const customers = ref([])
@@ -15,6 +17,106 @@ const scents = ref([])
 const searching = ref(false)
 const loadingDetail = ref(false)
 const error = ref('')
+const notice = ref('')
+
+// Editing a saved blend. Open to any employee — correcting a formula at the bar
+// is ordinary work, not an admin privilege.
+const editingMix = ref(null)
+const editName = ref('')
+const editItems = ref([])
+const savingMix = ref(false)
+
+function startEdit(mix) {
+  editingMix.value = mix.id
+  editName.value = mix.name || ''
+  // Deactivated ingredients would be rejected wholesale by the API, so drop them
+  // here and say so, rather than failing on save with nothing to point at.
+  const activeIds = new Set(ingredients.value.filter((i) => i.active).map((i) => i.id))
+  const usable = mix.items.filter((i) => activeIds.has(i.ingredient_id))
+  if (usable.length !== mix.items.length) {
+    notice.value = 'Some ingredients in this blend are no longer active and were left out.'
+  }
+  editItems.value = usable.map((i) => ({
+    ingredient_id: i.ingredient_id,
+    amount_ml: Number(i.amount_ml),
+  }))
+}
+
+function cancelEdit() {
+  editingMix.value = null
+  editItems.value = []
+}
+
+async function saveMix() {
+  if (!editName.value.trim()) {
+    error.value = 'A blend needs a name.'
+    return
+  }
+  savingMix.value = true
+  error.value = ''
+  try {
+    await api.updateMix(editingMix.value, {
+      name: editName.value.trim(),
+      items: editItems.value.map((i) => ({ ...i, amount_ml: Number(i.amount_ml) })),
+    })
+    cancelEdit()
+    notice.value = 'Blend updated.'
+    await select(selected.value)
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    savingMix.value = false
+  }
+}
+
+async function removeMix(mix) {
+  error.value = ''
+  notice.value = ''
+  try {
+    await api.deleteMix(mix.id)
+    notice.value = 'Blend deleted.'
+    await select(selected.value)
+  } catch (err) {
+    // Blends attached to an order refuse deletion so history stays intact.
+    error.value = err.message
+  }
+}
+
+async function removeOrder(order) {
+  error.value = ''
+  notice.value = ''
+  try {
+    await api.deleteOrder(order.id)
+    notice.value = 'Order deleted.'
+    await select(selected.value)
+  } catch (err) {
+    error.value = err.message
+  }
+}
+
+async function removeCustomer() {
+  error.value = ''
+  notice.value = ''
+  try {
+    const impact = await api.customerDeletionImpact(selected.value.id)
+    if (!impact.can_delete) {
+      error.value = impact.reason
+      return
+    }
+    const ok = window.confirm(
+      `Delete ${impact.email}?\n\n` +
+        `This removes ${impact.orders} order(s) and ${impact.mixes} blend(s). ` +
+        `It cannot be undone.`,
+    )
+    if (!ok) return
+    await api.deleteCustomer(selected.value.id)
+    notice.value = `Deleted ${impact.email}.`
+    back()
+    await search()
+  } catch (err) {
+    error.value = err.message
+  }
+}
 
 onMounted(async () => {
   try {
@@ -92,6 +194,7 @@ function formatDate(value) {
 
 <template>
   <p class="error" v-if="error">{{ error }}</p>
+  <p class="notice" v-if="notice">{{ notice }}</p>
 
   <template v-if="!selected">
     <div class="card">
@@ -156,20 +259,58 @@ function formatDate(value) {
       <div class="card">
         <h2>Saved mixes</h2>
         <p class="muted" v-if="!mixes.length">No custom mixes yet.</p>
-        <div v-for="mix in mixes" :key="mix.id" class="list-item" style="cursor: default">
-          <span class="grow">
-            <strong>{{ mix.name || 'Unnamed mix' }}</strong>
-            <span class="muted">{{ describeMix(mix) }}</span>
-            <span class="muted">{{ formatMl(totalMl(mix.items)) }} ml base · {{ formatDate(mix.created_at) }}</span>
-          </span>
-          <RouterLink
-            class="ghost"
-            style="flex: none"
-            :to="{ name: 'intake', query: { mix: mix.id, customer: selected.id } }"
-          >
-            Reorder
-          </RouterLink>
-        </div>
+        <template v-for="mix in mixes" :key="mix.id">
+          <div class="list-item" style="cursor: default">
+            <span class="grow">
+              <strong>{{ mix.name || 'Unnamed mix' }}</strong>
+              <span class="muted">{{ describeMix(mix) }}</span>
+              <span class="muted">{{ formatMl(totalMl(mix.items)) }} ml base · {{ formatDate(mix.created_at) }}</span>
+            </span>
+            <RouterLink
+              class="ghost"
+              style="flex: none"
+              :to="{ name: 'intake', query: { mix: mix.id, customer: selected.id } }"
+            >
+              Reorder
+            </RouterLink>
+          </div>
+          <div class="row" style="gap: 0.4rem; margin-bottom: 0.6rem">
+            <button
+              class="ghost"
+              type="button"
+              style="flex: none"
+              @click="editingMix === mix.id ? cancelEdit() : startEdit(mix)"
+            >
+              {{ editingMix === mix.id ? 'Cancel' : 'Edit blend' }}
+            </button>
+            <button
+              v-if="isAdmin"
+              class="ghost"
+              type="button"
+              style="flex: none"
+              @click="removeMix(mix)"
+            >
+              Delete
+            </button>
+          </div>
+
+          <div v-if="editingMix === mix.id" class="card" style="margin-bottom: 0.8rem">
+            <div class="field">
+              <label>Blend name</label>
+              <input v-model="editName" type="text" required />
+            </div>
+            <MixBuilder v-model="editItems" :ingredients="ingredients" />
+            <button
+              class="primary"
+              type="button"
+              style="margin-top: 0.7rem"
+              :disabled="savingMix"
+              @click="saveMix"
+            >
+              {{ savingMix ? 'Saving…' : 'Save blend' }}
+            </button>
+          </div>
+        </template>
       </div>
 
       <div class="card">
@@ -187,12 +328,23 @@ function formatDate(value) {
               {{ describeScent(order.scent_id) }}
             </span>
             <span class="muted">
+              <template v-if="order.quantity > 1">{{ order.quantity }} × </template>
               {{ bottleLabel(order.size) }}
               <template v-if="order.amount"> · ${{ order.amount }}</template>
               · {{ formatDate(order.created_at) }}
             </span>
           </span>
           <span class="badge">{{ order.status }}</span>
+          <button
+            v-if="isAdmin && order.status === 'lead'"
+            class="icon"
+            type="button"
+            aria-label="Delete order"
+            title="Delete this unsold order"
+            @click="removeOrder(order)"
+          >
+            ✕
+          </button>
         </div>
       </div>
 
@@ -203,6 +355,18 @@ function formatDate(value) {
         <RouterLink class="ghost" :to="{ name: 'checkout', query: { customer: selected.id } }">
           Take payment
         </RouterLink>
+      </div>
+
+      <div class="card" v-if="isAdmin" style="margin-top: 1rem">
+        <h2>Danger zone</h2>
+        <p class="muted">
+          Deleting a customer removes their blends and unsold orders. Anyone with a
+          paid or refunded cart cannot be deleted — that history has to reconcile
+          against Square, which keeps its own record.
+        </p>
+        <button class="ghost" type="button" @click="removeCustomer">
+          Delete this customer
+        </button>
       </div>
     </template>
   </template>

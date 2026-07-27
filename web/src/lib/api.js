@@ -62,6 +62,22 @@ export const api = {
   listScents: () => request('/scents'),
   createScent: (name) => request('/scents', { method: 'POST', body: { name } }),
   updateScent: (id, patch) => request(`/scents/${id}`, { method: 'PATCH', body: patch }),
+  // --- package deals ---
+  listBundles: () => request('/bundles'),
+  createBundle: (body) => request('/bundles', { method: 'POST', body }),
+  updateBundle: (id, body) => request(`/bundles/${id}`, { method: 'PATCH', body }),
+  deleteBundle: (id) => request(`/bundles/${id}`, { method: 'DELETE' }),
+
+  // --- admin deletion ---
+  // POST rather than DELETE so the intent reads as deliberate in logs and
+  // proxies; each refuses to remove anything money has touched.
+  customerDeletionImpact: (id) => request(`/customers/${id}/deletion-impact`),
+  deleteCustomer: (id) => request(`/customers/${id}/delete`, { method: 'POST' }),
+  deleteMix: (id) => request(`/mixes/${id}/delete`, { method: 'POST' }),
+  deleteOrder: (id) => request(`/orders/${id}/delete`, { method: 'POST' }),
+  deleteIngredient: (id) => request(`/ingredients/${id}/delete`, { method: 'POST' }),
+  deleteScent: (id) => request(`/scents/${id}/delete`, { method: 'POST' }),
+
   getSettings: () => request('/settings'),
   updateSettings: (patch) => request('/settings', { method: 'PATCH', body: patch }),
   getSyncStatus: () => request('/sync/status'),
@@ -112,6 +128,9 @@ export const api = {
   // One round trip for the lookup view: customer + mixes-with-items + orders.
   getReorder: (id) => request(`/customers/${id}/reorder`),
   getMix: (id) => request(`/mixes/${id}`),
+  // Any employee may correct a saved blend — fixing a formula at the bar is
+  // ordinary work, not an admin privilege.
+  updateMix: (id, patch) => request(`/mixes/${id}`, { method: 'PATCH', body: patch }),
   listOrders: (customerId, { uncarted = false } = {}) => {
     const q = new URLSearchParams()
     if (customerId) q.set('customer_id', customerId)

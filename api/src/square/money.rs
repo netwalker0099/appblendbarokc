@@ -33,6 +33,13 @@ pub fn to_cents(amount: Decimal) -> Option<i64> {
     Some(cents)
 }
 
+/// `6000` -> `60.00`. The inverse of [`to_cents`], for stating an amount that was
+/// computed in cents (a split package price) back in the decimal terms the rest
+/// of the app stores.
+pub fn from_cents(cents: i64) -> Decimal {
+    Decimal::new(cents, 2)
+}
+
 /// Render cents as a plain `$60.00` for logs, reports, and the admin UI.
 pub fn format_cents(cents: i64, currency: &str) -> String {
     let sign = if cents < 0 { "-" } else { "" };

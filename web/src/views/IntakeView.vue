@@ -1,37 +1,45 @@
 <script setup>
+/**
+ * Stand intake.
+ *
+ * One submission, several items: a customer taking a 3.4oz and a roller is one
+ * intake with two lines, each with its own quantity.
+ *
+ * There is no status to choose. Intake records what was made; nothing is owed
+ * until the order goes into a cart and that cart is checked out on the Checkout
+ * screen. Pricing comes from the catalogue — the amount box is an override, not
+ * a requirement.
+ */
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import MixBuilder from '../components/MixBuilder.vue'
 import { api } from '../lib/api.js'
-import { BOTTLE_SIZES, ORDER_STATUSES, ORDER_TYPES, bottleLabel, formatMl } from '../lib/bottle.js'
+import { BOTTLE_SIZES, ORDER_TYPES, bottleLabel, formatMl } from '../lib/bottle.js'
 
 const route = useRoute()
 const router = useRouter()
 
 const ingredients = ref([])
 const scents = ref([])
+const bundles = ref([])
 
 const email = ref('')
 const name = ref('')
 const marketingConsent = ref(false)
 const scentPreferenceIds = ref([])
 
-const orderType = ref('custom_mix')
-const size = ref('oz3_4')
-const status = ref('paid')
-const amount = ref('')
-const scentId = ref('')
-const mixName = ref('')
-const items = ref([])
+/** Each line is one blend in one size, with a quantity. */
+const lines = ref([])
+const bundleId = ref('')
 
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const result = ref(null)
 
-/// Held steady across retries so a resubmitted attempt cannot double-charge a
-/// customer; regenerated only when a fresh intake is started.
+/// Held steady across retries so a resubmitted attempt cannot record the same
+/// intake twice; regenerated only when a fresh intake is started.
 const idempotencyKey = ref(newKey())
 
 function newKey() {
@@ -39,24 +47,67 @@ function newKey() {
 }
 
 const activeScents = computed(() => scents.value.filter((s) => s.active))
+const activeBundles = computed(() => bundles.value.filter((b) => b.active))
 
 function ingredientName(id) {
   return ingredients.value.find((i) => i.id === id)?.name ?? 'Unknown'
 }
 
-// The house formula for the currently selected set-perfume scent, shown so the
-// operator can see what's actually in it — the set-perfume analogue of the mix.
-const selectedScentFormula = computed(() => {
-  const scent = scents.value.find((s) => s.id === scentId.value)
+function scentName(id) {
+  return scents.value.find((s) => s.id === id)?.name ?? '—'
+}
+
+function newLine(overrides = {}) {
+  return {
+    type: 'custom_mix',
+    size: 'oz3_4',
+    quantity: 1,
+    scent_id: '',
+    mixName: '',
+    items: [],
+    amount: '',
+    ...overrides,
+  }
+}
+
+function addLine() {
+  lines.value.push(newLine())
+}
+
+function removeLine(i) {
+  lines.value.splice(i, 1)
+}
+
+/** House formula for a chosen set-perfume, so the operator can see what's in it. */
+function scentFormula(id) {
+  const scent = scents.value.find((s) => s.id === id)
   if (!scent || !scent.items?.length) return ''
   return scent.items.map((i) => `${ingredientName(i.ingredient_id)} ${formatMl(i.amount_ml)}ml`).join(' · ')
-})
+}
+
+/** Catalogue price for a line, shown so staff know what will be charged. */
+function catalogPrice(line) {
+  if (line.type === 'set_perfume') {
+    const scent = scents.value.find((s) => s.id === line.scent_id)
+    return scent ? scent[`price_${line.size}`] : null
+  }
+  return settings.value ? settings.value[`custom_price_${line.size}`] : null
+}
+const settings = ref(null)
+
+function lineIsValid(line) {
+  if (!(Number(line.quantity) >= 1)) return false
+  if (line.type === 'set_perfume') return Boolean(line.scent_id)
+  // A blend nobody named is one nobody can find again.
+  if (!line.mixName.trim()) return false
+  return line.items.length > 0 && line.items.every((i) => Number(i.amount_ml) > 0)
+}
 
 const canSubmit = computed(() => {
   if (busy.value) return false
   if (!email.value.includes('@')) return false
-  if (orderType.value === 'set_perfume') return Boolean(scentId.value)
-  return items.value.length > 0 && items.value.every((i) => Number(i.amount_ml) > 0)
+  if (!lines.value.length && !bundleId.value) return false
+  return lines.value.every(lineIsValid)
 })
 
 function toggleScentPreference(id) {
@@ -67,10 +118,18 @@ function toggleScentPreference(id) {
 
 onMounted(async () => {
   try {
-    const [ing, sc] = await Promise.all([api.listIngredients(), api.listScents()])
+    const [ing, sc, bd, set] = await Promise.all([
+      api.listIngredients(),
+      api.listScents(),
+      api.listBundles(),
+      api.getSettings().catch(() => null), // workers can't read settings; prices just won't preview
+    ])
     ingredients.value = ing
     scents.value = sc
+    bundles.value = bd
+    settings.value = set
     await prefillFromQuery()
+    if (!lines.value.length) addLine()
   } catch (err) {
     error.value = err.message
   } finally {
@@ -92,16 +151,20 @@ async function prefillFromQuery() {
 
   if (mixId) {
     const detail = await api.getMix(mixId)
-    orderType.value = 'custom_mix'
-    mixName.value = detail.name || ''
-    // Drop ingredients that have since been deactivated — the API would
-    // reject the whole mix otherwise, with nothing pointing at the culprit.
+    // Drop ingredients that have since been deactivated — the API would reject
+    // the whole mix otherwise, with nothing pointing at the culprit.
     const activeIds = new Set(ingredients.value.filter((i) => i.active).map((i) => i.id))
     const usable = detail.items.filter((i) => activeIds.has(i.ingredient_id))
     if (usable.length !== detail.items.length) {
-      error.value = 'Some ingredients in this mix are no longer active and were left out.'
+      error.value = 'Some ingredients in this blend are no longer active and were left out.'
     }
-    items.value = usable.map((i) => ({ ingredient_id: i.ingredient_id, amount_ml: Number(i.amount_ml) }))
+    lines.value = [
+      newLine({
+        type: 'custom_mix',
+        mixName: detail.name || '',
+        items: usable.map((i) => ({ ingredient_id: i.ingredient_id, amount_ml: Number(i.amount_ml) })),
+      }),
+    ]
   }
 }
 
@@ -114,17 +177,21 @@ async function submit() {
       name: name.value.trim() || null,
       marketing_consent: marketingConsent.value,
       scent_preference_ids: scentPreferenceIds.value.length ? scentPreferenceIds.value : null,
-      order: {
-        type: orderType.value,
-        size: size.value,
-        status: status.value,
-        scent_id: orderType.value === 'set_perfume' ? scentId.value : null,
+      bundle_id: bundleId.value || null,
+      items: lines.value.map((line) => ({
+        type: line.type,
+        size: line.size,
+        quantity: Number(line.quantity) || 1,
+        scent_id: line.type === 'set_perfume' ? line.scent_id : null,
         mix:
-          orderType.value === 'custom_mix'
-            ? { name: mixName.value.trim() || null, items: items.value.map((i) => ({ ...i, amount_ml: Number(i.amount_ml) })) }
+          line.type === 'custom_mix'
+            ? {
+                name: line.mixName.trim(),
+                items: line.items.map((i) => ({ ...i, amount_ml: Number(i.amount_ml) })),
+              }
             : null,
-        amount: amount.value === '' ? null : Number(amount.value),
-      },
+        amount: line.amount === '' ? null : Number(line.amount),
+      })),
     }
     result.value = await api.submitIntake(payload, idempotencyKey.value)
   } catch (err) {
@@ -140,21 +207,12 @@ function startAnother() {
   name.value = ''
   marketingConsent.value = false
   scentPreferenceIds.value = []
-  orderType.value = 'custom_mix'
-  size.value = 'oz3_4'
-  status.value = 'paid'
-  amount.value = ''
-  scentId.value = ''
-  mixName.value = ''
-  items.value = []
+  lines.value = [newLine()]
+  bundleId.value = ''
   result.value = null
   error.value = ''
   idempotencyKey.value = newKey()
   if (Object.keys(route.query).length) router.replace({ name: 'intake' })
-}
-
-function scentName(id) {
-  return scents.value.find((s) => s.id === id)?.name ?? '—'
 }
 </script>
 
@@ -169,23 +227,40 @@ function scentName(id) {
         <dd>{{ result.customer.name || result.customer.email }}</dd>
         <dt>Email</dt>
         <dd>{{ result.customer.email }}</dd>
-        <dt>Order</dt>
-        <dd>
-          {{ result.order.order_type === 'custom_mix' ? 'Custom mix' : scentName(result.order.scent_id) }}
-          · {{ bottleLabel(result.order.size) }} · {{ result.order.status }}
-        </dd>
-        <dt v-if="result.order.amount">Amount</dt>
-        <dd v-if="result.order.amount">${{ result.order.amount }}</dd>
-        <template v-if="result.mix">
-          <dt>Mix</dt>
-          <dd>
-            {{ result.mix.name || 'Unnamed' }} —
-            {{ result.mix.items.length }} ingredient{{ result.mix.items.length === 1 ? '' : 's' }}
-          </dd>
-        </template>
       </dl>
+
+      <h3 style="margin-top: 1rem">
+        {{ result.orders.length }} item{{ result.orders.length === 1 ? '' : 's' }}
+      </h3>
+      <div v-for="r in result.orders" :key="r.id" class="list-item" style="cursor: default">
+        <span class="grow">
+          <strong>
+            <template v-if="r.quantity > 1">{{ r.quantity }} × </template>
+            {{ r.order_type === 'custom_mix' ? (r.mix?.name || 'Custom blend') : scentName(r.scent_id) }}
+          </strong>
+          <span class="muted">{{ bottleLabel(r.size) }}</span>
+        </span>
+        <span class="badge" v-if="r.amount">${{ r.amount }}</span>
+        <span class="badge danger-badge" v-else>No price</span>
+      </div>
+
+      <p class="muted" style="margin-top: 0.9rem">
+        Nothing has been charged yet. Take payment on the
+        <RouterLink :to="{ name: 'checkout', query: { customer: result.customer.id } }">
+          Checkout
+        </RouterLink>
+        screen.
+      </p>
     </div>
-    <button class="primary" type="button" @click="startAnother">Start another intake</button>
+    <div class="row" style="gap: 0.5rem">
+      <button class="primary" type="button" @click="startAnother">Start another intake</button>
+      <RouterLink
+        class="ghost"
+        :to="{ name: 'checkout', query: { customer: result.customer.id } }"
+      >
+        Take payment
+      </RouterLink>
+    </div>
   </template>
 
   <form v-else @submit.prevent="submit">
@@ -231,8 +306,45 @@ function scentName(id) {
       </div>
     </div>
 
-    <div class="card">
-      <h2>Order</h2>
+    <div class="card" v-if="activeBundles.length">
+      <h2>Package deal</h2>
+      <p class="muted">
+        Optional. The package's bottles are added on top of the items below, priced
+        to its package total.
+      </p>
+      <div class="chips">
+        <button
+          type="button"
+          :aria-pressed="bundleId === ''"
+          @click="bundleId = ''"
+        >
+          None
+        </button>
+        <button
+          v-for="b in activeBundles"
+          :key="b.id"
+          type="button"
+          :aria-pressed="bundleId === b.id"
+          @click="bundleId = b.id"
+        >
+          {{ b.name }} — ${{ b.price }}
+        </button>
+      </div>
+    </div>
+
+    <div class="card" v-for="(line, i) in lines" :key="i">
+      <div class="row" style="align-items: baseline">
+        <h2 class="grow">Item {{ i + 1 }}</h2>
+        <button
+          v-if="lines.length > 1"
+          class="icon"
+          type="button"
+          aria-label="Remove item"
+          @click="removeLine(i)"
+        >
+          ✕
+        </button>
+      </div>
 
       <div class="field">
         <label>Type</label>
@@ -241,8 +353,8 @@ function scentName(id) {
             v-for="option in ORDER_TYPES"
             :key="option.value"
             type="button"
-            :aria-pressed="orderType === option.value"
-            @click="orderType = option.value"
+            :aria-pressed="line.type === option.value"
+            @click="line.type = option.value"
           >
             {{ option.label }}
           </button>
@@ -256,64 +368,81 @@ function scentName(id) {
             v-for="option in BOTTLE_SIZES"
             :key="option.value"
             type="button"
-            :aria-pressed="size === option.value"
-            @click="size = option.value"
+            :aria-pressed="line.size === option.value"
+            @click="line.size = option.value"
           >
             {{ option.label }}
           </button>
         </div>
       </div>
 
-      <div class="field">
-        <label>Status</label>
-        <div class="seg">
-          <button
-            v-for="option in ORDER_STATUSES"
-            :key="option.value"
-            type="button"
-            :aria-pressed="status === option.value"
-            @click="status = option.value"
-          >
-            {{ option.label }}
-          </button>
+      <div class="row">
+        <div class="field" style="flex: none; width: 7rem">
+          <label>Quantity</label>
+          <input v-model="line.quantity" type="number" inputmode="numeric" min="1" step="1" />
+        </div>
+        <div class="field grow">
+          <label>Price override (optional)</label>
+          <input v-model="line.amount" type="number" inputmode="decimal" min="0" step="0.01" />
+          <p class="muted" style="margin: 0.3rem 0 0; font-size: 0.85rem">
+            <template v-if="line.amount === '' && catalogPrice(line)">
+              Catalogue price ${{ catalogPrice(line) }} each.
+            </template>
+            <template v-else-if="line.amount === ''">
+              No catalogue price set for this size — add one in Admin, or type a price.
+            </template>
+            <template v-else>Overriding the catalogue price.</template>
+          </p>
         </div>
       </div>
 
-      <div class="field">
-        <label for="amount">Amount (optional)</label>
-        <input id="amount" v-model="amount" type="number" inputmode="decimal" min="0" step="0.01" />
-      </div>
+      <template v-if="line.type === 'set_perfume'">
+        <div class="field">
+          <label>Scent</label>
+          <p class="muted" v-if="!activeScents.length">No active scents to choose from.</p>
+          <div class="chips" v-else>
+            <button
+              v-for="scent in activeScents"
+              :key="scent.id"
+              type="button"
+              :aria-pressed="line.scent_id === scent.id"
+              @click="line.scent_id = scent.id"
+            >
+              {{ scent.name }}
+            </button>
+          </div>
+          <p class="muted" v-if="scentFormula(line.scent_id)" style="margin-top: 0.5rem">
+            {{ scentFormula(line.scent_id) }}
+          </p>
+        </div>
+      </template>
+
+      <template v-else>
+        <div class="field">
+          <label :for="`mixname-${i}`">Blend name</label>
+          <input
+            :id="`mixname-${i}`"
+            v-model="line.mixName"
+            type="text"
+            autocomplete="off"
+            required
+            placeholder="e.g. Amber Evening"
+          />
+          <p class="muted" style="margin: 0.3rem 0 0; font-size: 0.85rem">
+            Required — this is how the customer finds it again to reorder.
+          </p>
+        </div>
+        <MixBuilder v-model="line.items" :ingredients="ingredients" :size="line.size" />
+      </template>
     </div>
 
-    <div class="card" v-if="orderType === 'set_perfume'">
-      <h2>Scent</h2>
-      <p class="muted" v-if="!activeScents.length">No active scents to choose from.</p>
-      <div class="chips" v-else>
-        <button
-          v-for="scent in activeScents"
-          :key="scent.id"
-          type="button"
-          :aria-pressed="scentId === scent.id"
-          @click="scentId = scent.id"
-        >
-          {{ scent.name }}
-        </button>
-      </div>
-      <p class="muted" v-if="scentId" style="margin-top: 0.6rem">
-        {{ selectedScentFormula || 'No formula set for this scent yet.' }}
-      </p>
-    </div>
+    <button class="ghost" type="button" @click="addLine">+ Add another item</button>
 
-    <template v-else>
-      <div class="card">
-        <h2>Mix name</h2>
-        <input v-model="mixName" type="text" placeholder="Optional" aria-label="Mix name" />
-      </div>
-      <MixBuilder v-model="items" :ingredients="ingredients" :size="size" />
-    </template>
-
-    <button class="primary" type="submit" :disabled="!canSubmit">
-      {{ busy ? 'Saving…' : 'Submit intake' }}
+    <button class="primary" type="submit" :disabled="!canSubmit" style="margin-top: 0.8rem">
+      {{ busy ? 'Saving…' : 'Save intake' }}
     </button>
+    <p class="muted" style="margin-top: 0.5rem; font-size: 0.88rem">
+      Saving records what was made. Payment is taken separately on the Checkout screen.
+    </p>
   </form>
 </template>

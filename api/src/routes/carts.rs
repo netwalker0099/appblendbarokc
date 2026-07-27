@@ -142,7 +142,9 @@ pub async fn create(
         lines.push((
             Some(order.id),
             format!("{} ({})", order.order_type.label(), order.size.label()),
-            1,
+            // Quantity rides through from the order: `amount` is the price of one
+            // bottle, and the cart multiplies.
+            order.quantity,
             cents,
             "blend",
         ));

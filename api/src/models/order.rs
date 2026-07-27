@@ -108,8 +108,15 @@ pub struct Order {
     pub mix_id: Option<Uuid>,
     pub scent_id: Option<Uuid>,
     pub status: OrderStatus,
+    /// How many bottles of this blend in this size. Two of the same thing is one
+    /// order of quantity 2 — the blend was mixed once.
+    pub quantity: i32,
     pub external_ref: Option<String>,
     pub amount: Option<Decimal>,
-    pub idempotency_key: Option<String>,
+    /// The submission that produced this order; idempotency lives there, since
+    /// one submission can legitimately create several orders.
+    pub intake_id: Option<Uuid>,
+    /// Set when the order came from a package deal.
+    pub bundle_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
 }

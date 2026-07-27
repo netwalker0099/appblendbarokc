@@ -29,10 +29,14 @@ export function ingredientTypeLabel(value) {
   return INGREDIENT_TYPES.find((t) => t.value === value)?.label ?? value
 }
 
-export const ORDER_STATUSES = [
-  { value: 'paid', label: 'Paid' },
-  { value: 'lead', label: 'Lead' },
-]
+// Order status is no longer chosen anywhere: intake always records a lead, and
+// 'paid' is set by Square settling a cart. Kept only as the label lookup for
+// displaying a status that already exists.
+export const ORDER_STATUS_LABELS = {
+  lead: 'Lead',
+  paid: 'Paid',
+  fulfilled: 'Fulfilled',
+}
 
 export function bottleLabel(size) {
   return BOTTLE_SIZES.find((s) => s.value === size)?.label ?? size
