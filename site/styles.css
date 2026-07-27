@@ -314,6 +314,42 @@ section {
   font-size: 0.98rem;
 }
 
+/* --- Event booking terms --- */
+.terms {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+  margin-top: clamp(2.5rem, 5vw, 3.5rem);
+}
+
+.terms-col {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 2rem 1.8rem;
+}
+
+.terms-col h3 {
+  font-size: 1.2rem;
+  margin-bottom: 1rem;
+}
+
+.terms-col ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.terms-col li + li {
+  margin-top: 0.9rem;
+}
+
+.terms-col li::marker {
+  color: var(--gold);
+}
+
 /* --- Signature product --- */
 .product {
   display: grid;
@@ -693,7 +729,8 @@ section {
     margin: 0 auto;
   }
   .cards,
-  .access .cards {
+  .access .cards,
+  .terms {
     grid-template-columns: 1fr;
   }
   .nav .links {
