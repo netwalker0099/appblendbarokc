@@ -10,6 +10,7 @@ pub enum AppError {
     Forbidden,
     NotFound(String),
     Conflict(String),
+    TooManyRequests(String),
     Unavailable(String),
     Internal(String),
 }
@@ -22,6 +23,7 @@ impl IntoResponse for AppError {
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden".to_string()),
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg),
+            AppError::TooManyRequests(msg) => (StatusCode::TOO_MANY_REQUESTS, msg),
             AppError::Unavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
             AppError::Internal(msg) => {
                 tracing::error!("internal error: {msg}");

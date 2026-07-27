@@ -228,10 +228,34 @@ pub async fn cancel_cart(
         return Ok(false);
     }
 
+    // Remember what this cart held before releasing the links, so speculative
+    // online orders can be cleaned up below.
+    let released: Vec<Uuid> = sqlx::query_scalar(
+        "select order_id from cart_items where cart_id = $1 and order_id is not null",
+    )
+    .bind(cart_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
     sqlx::query("update cart_items set order_id = null where cart_id = $1")
         .bind(cart_id)
         .execute(&mut *tx)
         .await?;
+
+    // An order raised by the public share page exists only because someone
+    // clicked Buy; if they never paid, nothing was ever made and the row is
+    // noise — worse, it would sit on that email's account as an order they
+    // never placed. Orders taken at the bar are left alone: those blends
+    // physically exist whether or not this particular cart was paid.
+    if !released.is_empty() {
+        sqlx::query(
+            "delete from orders where id = any($1) and external_ref = 'public_share' \
+             and status = 'lead'",
+        )
+        .bind(&released)
+        .execute(&mut *tx)
+        .await?;
+    }
 
     tx.commit().await?;
 

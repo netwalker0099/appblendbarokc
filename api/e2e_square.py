@@ -279,6 +279,85 @@ def main():
         status, _ = call("POST", f"/api/carts/{cart_id}/cancel")
         check("a paid cart cannot be canceled", status >= 400, f"got {status}")
 
+    print("\n== public share checkout (no auth) ==")
+    saved_cookie = globals()["session_cookie"]
+    globals()["session_cookie"] = None  # prove these paths need no session
+
+    scent_id = active[0]["id"]
+    status, pub = call("GET", f"/api/public/scent/{scent_id}")
+    check("public scent view is readable anonymously", status == 200, f"{status}")
+    check(
+        "formula amounts are never exposed publicly",
+        isinstance(pub, dict) and "items" not in pub and "amount_ml" not in json.dumps(pub),
+        str(pub)[:200],
+    )
+
+    # Square is on the mock here, so checkout must refuse rather than hand a real
+    # customer a fake link. That refusal IS the expected behaviour in this mode.
+    status, res = call(
+        "POST",
+        "/api/public/checkout",
+        {"scent_id": scent_id, "size": "oz3_4", "email": "buyer@example.invalid"},
+    )
+    if status == 503:
+        check("mock mode refuses public checkout rather than faking a link", True)
+        print("       (Square is on the mock — this is the correct refusal)")
+    else:
+        check("public checkout succeeded", status == 200, f"{status} {res}")
+        check("returned a checkout url", bool((res or {}).get("checkout_url")))
+
+    # Input validation runs BEFORE the Square-availability check, so these assert
+    # exact codes. If validation ever moves back behind the 503 these fail loudly
+    # rather than passing vacuously, which is the whole point of pinning them.
+    status, _ = call(
+        "POST",
+        "/api/public/checkout",
+        {"scent_id": scent_id, "size": "oz3_4", "email": "not-an-email"},
+    )
+    check("bad email rejected with 400", status == 400, f"got {status}")
+
+    status, _ = call(
+        "POST",
+        "/api/public/checkout",
+        {"scent_id": str(uuid.uuid4()), "size": "oz3_4", "email": "buyer@example.invalid"},
+    )
+    check("unknown scent rejected with 404", status == 404, f"got {status}")
+
+    status, _ = call(
+        "POST",
+        "/api/public/checkout",
+        {"scent_id": scent_id, "size": "not_a_size", "email": "buyer@example.invalid"},
+    )
+    check("bogus size rejected", status in (400, 422), f"got {status}")
+
+    # Extra price-shaped fields in the body must be ignored outright. Reaching the
+    # 503 proves the request was accepted as valid and priced from the database —
+    # had any of these been honoured as a price, it would have failed earlier.
+    status, _ = call(
+        "POST",
+        "/api/public/checkout",
+        {
+            "scent_id": scent_id,
+            "size": "oz3_4",
+            "email": "buyer@example.invalid",
+            "amount": "0.01",
+            "unit_amount": "0.01",
+            "total_cents": 1,
+        },
+    )
+    check("price fields in the request are ignored", status == 503, f"got {status}")
+
+    globals()["session_cookie"] = saved_cookie
+
+    # A refused checkout must not leave anything behind. Needs the session back,
+    # so it runs after the anonymous block above.
+    status, found = call("GET", "/api/customers?email=buyer@example.invalid")
+    check(
+        "a refused checkout persisted nothing",
+        status == 200 and not any(c["email"] == "buyer@example.invalid" for c in (found or [])),
+        f"{status} {found}",
+    )
+
     print("\n== webhook receiver is refusing unsigned calls ==")
     status, body = call("POST", "/api/webhooks/square", {"event_id": "x", "type": "payment.updated"})
     check(

@@ -5,6 +5,7 @@ mod db;
 mod employee_auth;
 mod error;
 mod models;
+mod ratelimit;
 mod routes;
 mod square;
 mod sync;
@@ -30,6 +31,9 @@ pub struct AppState {
     /// attacker-controlled, and deriving it would let a caller choose the string
     /// their forged signature was computed over.
     pub square_webhook_url: Option<Arc<str>>,
+    /// Guards the one unauthenticated endpoint that writes rows and calls Square
+    /// (the share-page checkout).
+    pub public_checkout_limiter: Arc<ratelimit::RateLimiter>,
 }
 
 #[tokio::main]
@@ -123,6 +127,13 @@ async fn main() {
         square: square::from_env(),
         square_webhook_key,
         square_webhook_url,
+        // Ten checkout attempts per IP per five minutes: far more than a real
+        // buyer needs (pick a size, tap Buy), far less than is useful for
+        // stuffing the database or Square's API.
+        public_checkout_limiter: Arc::new(ratelimit::RateLimiter::new(
+            10,
+            std::time::Duration::from_secs(300),
+        )),
     };
 
     // Push contacts to Square Customers and expire abandoned checkouts, for the

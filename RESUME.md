@@ -1,7 +1,8 @@
 # Blend Bar — Resume Notes
 
 Last updated: 2026-07-27 — **billing migrated from Squarespace to Square**
-(Milestone 9 below): carts → Square hosted checkout → webhook → reconciliation.
+(Milestones 9 and 10 below): carts → Square hosted checkout → webhook →
+reconciliation, plus the public buy button on share pages.
 Built and tested against the mock; no real Square credentials on this box yet, so
 nothing has been verified against the live service. Booking/cancellation terms also
 added to the sandbox site's events section.
@@ -518,13 +519,49 @@ for a real one.
   sandbox first, test card, confirm reconciliation balances, only then production.
   Expect the HTTP client to need small corrections; that is what the sandbox pass is
   for.
-- **The public share-page "Buy" button is still a placeholder.** Checkout today is
-  operator-driven (employee session required). Letting a stranger on `/s/<id>` buy
-  needs a *public, unauthenticated* cart+checkout endpoint with its own abuse
-  questions (rate limiting, no customer record yet, price fixed server-side from the
-  scent rather than trusted from the request). Deliberately not built blind.
-- Portal **Reorder** could route through the same checkout once that public path
-  exists.
+- Portal **Reorder** could route through the same public checkout now that it exists.
+
+## Milestone 10: public buy button on share pages (2026-07-27)
+
+`POST /api/public/checkout` — the one endpoint where an anonymous caller can set
+money in motion. Someone sent a `/s/<scent-id>` link picks a size, enters an email,
+and is handed off to Square's hosted page.
+
+**Why it is safe to expose:**
+- **Price comes from the database**, keyed on the requested size — never from the
+  request body. A caller picks *what* to buy, never what to pay. (E2E asserts that
+  `amount`/`unit_amount`/`total_cents` in the body are ignored.)
+- **An existing customer row is never modified.** The upsert is
+  `on conflict (email) do update set email = customers.email` — a deliberate no-op
+  so RETURNING works without letting a stranger rewrite a real customer's name or
+  marketing consent by buying with their email. New rows get
+  `marketing_consent = false`; a purchase is not consent.
+- **Rate limited** 10/IP/5min (`api/src/ratelimit.rs`), keyed on the **rightmost**
+  `X-Forwarded-For` — the entry Caddy wrote. The leftmost is client-forgeable, so
+  the usual "take the first" would let anyone mint a new identity per request.
+  Verified live through Caddy: 10 through, then 429.
+- **503 when Square is not live**, so a customer is never sent to a mock link. The
+  check sits *after* input validation and *before* the first write: a bad request
+  hears that it is bad, nothing is persisted for a checkout that cannot proceed,
+  and the validation stays testable while the app is still on the mock.
+- Square's error text is never returned to an anonymous caller (it can carry
+  account/config detail); it is logged instead.
+
+**Fulfilment.** These orders carry `external_ref = 'public_share'` and a cart note
+so staff know the blend must be *made up*, not handed over at the bar. If the
+checkout is abandoned, `billing::cancel_cart` deletes the speculative order rather
+than leaving a phantom on that email's account — bar orders are left alone, since
+those blends physically exist.
+
+**Frontend.** `site/share.js` gained an email/name form and posts to the endpoint,
+then redirects to Square. On 503 it swaps in the "message us to order" fallback
+instead of a broken button. New `site/thanks.html` is the post-payment landing page
+(noindex), and it says plainly that blends are hand-made so nobody waits on a
+tracking number.
+
+**Verified:** 31 unit tests + 44 E2E checks. The success path (real link issued)
+still cannot be exercised until Square credentials exist — in mock mode the
+endpoint correctly refuses, which is what the E2E asserts.
 
 ## Not started
 

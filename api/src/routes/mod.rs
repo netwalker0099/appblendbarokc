@@ -94,7 +94,10 @@ pub fn build_router(state: AppState) -> Router {
     // Public share targets (no auth): scent view (names, no amounts) + QR.
     let public_routes = Router::new()
         .route("/api/public/scent/:id", get(public::scent))
-        .route("/api/public/scent/:id/qr", get(public::scent_qr));
+        .route("/api/public/scent/:id/qr", get(public::scent_qr))
+        // Anonymous checkout from a share link. Rate-limited, server-priced, and
+        // disabled unless Square is live — see the handler docs.
+        .route("/api/public/checkout", post(public::checkout));
 
     Router::new()
         .route("/api/health", get(crate::health))

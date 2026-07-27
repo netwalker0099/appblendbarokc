@@ -140,6 +140,35 @@ decimals. The conversion from the decimal prices operators type lives in
 `api/src/square/money.rs` and is unit-tested — that is the one place a rounding bug
 would silently charge the wrong amount without ever throwing.
 
+### Buying from a share link (public checkout)
+
+`POST /api/public/checkout` lets someone who was sent a `/s/<scent-id>` link buy
+that scent without an account. It is the only endpoint in the app where an
+anonymous caller can set money in motion, so it is deliberately narrow:
+
+- **The price is read from the database**, keyed on the requested size — never
+  taken from the request. A caller chooses *what* to buy, never what to pay.
+- **An existing customer row is never modified.** Buying with someone else's email
+  must not let a stranger rewrite their name or flip their marketing consent, so
+  an existing record is used exactly as-is. New records are created with
+  `marketing_consent = false` — a purchase is not consent.
+- **Rate limited** to 10 attempts per IP per 5 minutes, keyed on the *rightmost*
+  `X-Forwarded-For` entry (the one Caddy wrote; the leftmost is client-forgeable).
+- **Refused with 503 when Square is not live.** A staff member seeing a mock link
+  is an inconvenience; sending a paying customer to a dead URL is not, so the
+  endpoint refuses rather than hand back a fake checkout. The share page then
+  shows a "message us to order" fallback instead of a broken button.
+- Square's error text is never returned to an anonymous caller — it can carry
+  account and configuration detail.
+
+Orders created this way carry `external_ref = 'public_share'` and a cart note, so
+staff can see the blend has to be **made up and shipped/collected**, not handed
+over at the bar. If such a checkout is abandoned, expiry deletes the speculative
+order rather than leaving a phantom on that customer's account — orders taken at
+the bar are left alone, because those blends physically exist.
+
+After payment Square returns the buyer to `/thanks`.
+
 ### Reconciliation
 
 `GET /api/square/reconcile?from=&to=` compares what this app recorded selling against
