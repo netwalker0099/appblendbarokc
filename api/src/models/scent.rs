@@ -12,6 +12,7 @@ pub struct Scent {
     pub price_oz3_4: Option<Decimal>,
     pub price_oz1_7: Option<Decimal>,
     pub price_roller: Option<Decimal>,
+    pub price_spray: Option<Decimal>,
     pub created_at: DateTime<Utc>,
 }
 

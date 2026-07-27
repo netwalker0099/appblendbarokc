@@ -279,6 +279,44 @@ def main():
         status, _ = call("POST", f"/api/carts/{cart_id}/cancel")
         check("a paid cart cannot be canceled", status >= 400, f"got {status}")
 
+    print("\n== spray (10 ml) size ==")
+    status, spray_intake = call(
+        "POST",
+        "/api/intake",
+        {
+            "email": email,
+            "marketing_consent": False,
+            "order": {
+                "type": "set_perfume",
+                "size": "spray",
+                "status": "lead",
+                "scent_id": active[0]["id"],
+                "amount": "28.00",
+            },
+        },
+        {"Idempotency-Key": str(uuid.uuid4())},
+    )
+    check("a spray order can be taken", status == 201, f"{status} {spray_intake}")
+    if status == 201:
+        spray_order_id = spray_intake["order"]["id"]
+        check("size round-trips as 'spray'", spray_intake["order"]["size"] == "spray")
+
+        status, spray_cart = call(
+            "POST", "/api/carts", {"customer_id": customer_id, "order_ids": [spray_order_id]}
+        )
+        check("a spray order can be carted", status == 201, f"{status} {spray_cart}")
+        if status == 201:
+            line = (spray_cart.get("items") or [{}])[0]
+            # The label is what a customer sees on their Square receipt and what
+            # staff read when building the order — it must say spray, not roller.
+            check(
+                "cart line is labelled Spray, not Roller",
+                "Spray" in line.get("name", "") and "Roller" not in line.get("name", ""),
+                line.get("name"),
+            )
+            check("spray line priced from the order", spray_cart["total_cents"] == 2800,
+                  str(spray_cart["total_cents"]))
+
     print("\n== public share checkout (no auth) ==")
     saved_cookie = globals()["session_cookie"]
     globals()["session_cookie"] = None  # prove these paths need no session

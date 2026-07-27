@@ -146,8 +146,9 @@ function removeAt(index) {
     </p>
 
     <!-- Pour chart: enter amounts once at the 3.4oz base and every bottle size is
-         derived here (1.7oz is half, roller a tenth). The size being ordered, if
-         any, is highlighted. -->
+         derived here (1.7oz is half; roller and spray are a tenth — both are
+         10 ml, differing only in the closure). The size being ordered, if any,
+         is highlighted. -->
     <template v-if="modelValue.length">
       <p class="muted pour-caption">Pour chart — amounts per bottle size (ml)</p>
       <div class="pour-chart">

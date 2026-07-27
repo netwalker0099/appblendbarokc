@@ -10,7 +10,8 @@ use crate::error::AppError;
 use crate::models::settings::Settings;
 use crate::AppState;
 
-const COLS: &str = "custom_price_oz3_4, custom_price_oz1_7, custom_price_roller";
+const COLS: &str =
+    "custom_price_oz3_4, custom_price_oz1_7, custom_price_roller, custom_price_spray";
 
 pub async fn get(
     _admin: AdminEmployee,
@@ -27,6 +28,7 @@ pub struct UpdateSettings {
     pub custom_price_oz3_4: Option<Decimal>,
     pub custom_price_oz1_7: Option<Decimal>,
     pub custom_price_roller: Option<Decimal>,
+    pub custom_price_spray: Option<Decimal>,
 }
 
 pub async fn update(
@@ -38,6 +40,7 @@ pub async fn update(
         body.custom_price_oz3_4,
         body.custom_price_oz1_7,
         body.custom_price_roller,
+        body.custom_price_spray,
     ]
     .into_iter()
     .flatten()
@@ -48,11 +51,14 @@ pub async fn update(
     }
 
     let s = sqlx::query_as::<_, Settings>(&format!(
-        "update settings set custom_price_oz3_4 = $1, custom_price_oz1_7 = $2, custom_price_roller = $3 where id = true returning {COLS}"
+        "update settings set custom_price_oz3_4 = $1, custom_price_oz1_7 = $2, \
+         custom_price_roller = $3, custom_price_spray = $4 \
+         where id = true returning {COLS}"
     ))
     .bind(body.custom_price_oz3_4)
     .bind(body.custom_price_oz1_7)
     .bind(body.custom_price_roller)
+    .bind(body.custom_price_spray)
     .fetch_one(&state.db)
     .await?;
     Ok(Json(s))

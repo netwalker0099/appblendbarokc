@@ -30,6 +30,7 @@
       ['3.4 oz', 'oz3_4', s.price_oz3_4],
       ['1.7 oz', 'oz1_7', s.price_oz1_7],
       ['Roller', 'roller', s.price_roller],
+      ['Spray · 10 ml', 'spray', s.price_spray],
     ].filter(([, , v]) => v != null)
     const sizeRows = sizes
       .map(

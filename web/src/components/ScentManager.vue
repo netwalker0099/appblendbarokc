@@ -32,6 +32,7 @@ watch(
         oz3_4: scent.price_oz3_4 ?? '',
         oz1_7: scent.price_oz1_7 ?? '',
         roller: scent.price_roller ?? '',
+        spray: scent.price_spray ?? '',
       }
     }
   },
@@ -56,6 +57,7 @@ function priceSummary(scent) {
     ['3.4oz', scent.price_oz3_4],
     ['1.7oz', scent.price_oz1_7],
     ['roller', scent.price_roller],
+    ['spray', scent.price_spray],
   ]
     .filter(([, v]) => v != null)
     .map(([label, v]) => `${label} $${v}`)
@@ -84,6 +86,7 @@ async function save(scent) {
       oz3_4: priceVal(p.oz3_4),
       oz1_7: priceVal(p.oz1_7),
       roller: priceVal(p.roller),
+      spray: priceVal(p.spray),
     })
   } finally {
     saving[scent.id] = false
@@ -145,6 +148,10 @@ async function save(scent) {
             <div>
               <label>Roller</label>
               <input type="number" inputmode="decimal" min="0" step="0.01" v-model="prices[scent.id].roller" />
+            </div>
+            <div>
+              <label>Spray (10 ml)</label>
+              <input type="number" inputmode="decimal" min="0" step="0.01" v-model="prices[scent.id].spray" />
             </div>
           </div>
         </div>

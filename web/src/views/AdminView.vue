@@ -27,7 +27,13 @@ function isoDaysAgo(n) {
   d.setDate(d.getDate() - n)
   return d.toISOString().slice(0, 10)
 }
-const customPrices = reactive({ custom_price_oz3_4: '', custom_price_oz1_7: '', custom_price_roller: '' })
+const CUSTOM_PRICE_KEYS = [
+  'custom_price_oz3_4',
+  'custom_price_oz1_7',
+  'custom_price_roller',
+  'custom_price_spray',
+]
+const customPrices = reactive(Object.fromEntries(CUSTOM_PRICE_KEYS.map((k) => [k, ''])))
 const savingPrices = ref(false)
 
 const loading = ref(true)
@@ -55,7 +61,7 @@ async function load() {
     sync.value = st
     square.value = sq
     squareEvents.value = ev
-    for (const k of ['custom_price_oz3_4', 'custom_price_oz1_7', 'custom_price_roller']) {
+    for (const k of CUSTOM_PRICE_KEYS) {
       customPrices[k] = set[k] ?? ''
     }
   } catch (err) {
@@ -82,11 +88,9 @@ async function saveCustomPrices() {
   savingPrices.value = true
   try {
     const num = (v) => (v === '' || v === null ? null : Number(v))
-    await api.updateSettings({
-      custom_price_oz3_4: num(customPrices.custom_price_oz3_4),
-      custom_price_oz1_7: num(customPrices.custom_price_oz1_7),
-      custom_price_roller: num(customPrices.custom_price_roller),
-    })
+    await api.updateSettings(
+      Object.fromEntries(CUSTOM_PRICE_KEYS.map((k) => [k, num(customPrices[k])])),
+    )
     flash('Saved custom-blend prices.')
   } catch (err) {
     handle(err)
@@ -275,6 +279,10 @@ function formatTime(value) {
         <div>
           <label>Roller</label>
           <input type="number" inputmode="decimal" min="0" step="0.01" v-model="customPrices.custom_price_roller" />
+        </div>
+        <div>
+          <label>Spray (10 ml)</label>
+          <input type="number" inputmode="decimal" min="0" step="0.01" v-model="customPrices.custom_price_spray" />
         </div>
       </div>
       <button class="ghost" type="button" :disabled="savingPrices" style="margin-top: 0.8rem" @click="saveCustomPrices">

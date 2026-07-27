@@ -563,6 +563,37 @@ tracking number.
 still cannot be exercised until Square credentials exist — in mock mode the
 endpoint correctly refuses, which is what the E2E asserts.
 
+## Milestone 11: fourth bottle size — Spray (2026-07-27)
+
+Owner: *"add a 4th size and label it as Spray — it's a 10ml with a spray top
+instead of a roller."*
+
+**The load-bearing detail:** the base formula is 3.4oz ≈ 100 ml, and the roller is
+a tenth of it = 10 ml. The spray is *also* 10 ml. So spray and roller share a pour
+factor (0.1) and differ only in the closure (atomiser vs rollerball) and in price.
+No new scaling maths anywhere — `BOTTLE_SIZES` in `web/src/lib/bottle.js` just
+gains a fourth row with the same factor, and the pour chart picks it up
+automatically since it iterates that list.
+
+Migration 0012: widens the `orders_size_check` constraint to include `'spray'`,
+and adds `scents.price_spray` + `settings.custom_price_spray` (nullable, like the
+others — null means "not sold in this size" and the share page hides the option).
+
+Rust `BottleSize::Spray` labels as **"Spray (10 ml)"**. Two new tests pin the
+things that would break quietly: that every size has a *distinct* label (an
+operator reading "Roller" on a spray order builds the wrong thing) and that the
+wire strings are stable (they are persisted in `orders.size` and sent by the
+public share page).
+
+Touched for the new size: scent price editor, custom-blend pricing card, the
+public share page's size options, the customer portal's size labels, and the
+public checkout's price lookup.
+
+**Owner action needed:** spray prices are **null everywhere**. Until an admin sets
+them (Admin → per-scent Prices, and Custom blend pricing), the spray option will
+not appear on share pages and a spray order cannot be carted. That is deliberate —
+the app will not invent a price.
+
 ## Not started
 
 ## Security posture (reviewed 2026-07-24)

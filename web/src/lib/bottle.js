@@ -1,10 +1,15 @@
 /// Mix amounts are always stored as the 3.4oz base formula. The 1.7oz bottle is
-/// half of that and the roller a tenth — derived here at display time, never
-/// stored per size. Mirrors the note on `MixItem` in the API.
+/// half of that; the roller and the spray are a tenth — derived here at display
+/// time, never stored per size. Mirrors the note on `MixItem` in the API.
+///
+/// Roller and spray share a factor because both are 10 ml; they differ only in
+/// the closure (rollerball vs atomiser) and in price. If that ever stops being
+/// true they need separate factors here *and* in the API's `BottleSize`.
 export const BOTTLE_SIZES = [
   { value: 'oz3_4', label: '3.4 oz', factor: 1 },
   { value: 'oz1_7', label: '1.7 oz', factor: 0.5 },
   { value: 'roller', label: 'Roller', factor: 0.1 },
+  { value: 'spray', label: 'Spray (10 ml)', factor: 0.1 },
 ]
 
 export const ORDER_TYPES = [

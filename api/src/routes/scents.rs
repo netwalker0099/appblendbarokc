@@ -155,6 +155,7 @@ pub struct ScentPrices {
     pub oz3_4: Option<Decimal>,
     pub oz1_7: Option<Decimal>,
     pub roller: Option<Decimal>,
+    pub spray: Option<Decimal>,
 }
 
 #[derive(Deserialize)]
@@ -162,7 +163,7 @@ pub struct UpdateScentRequest {
     pub name: Option<String>,
     pub active: Option<bool>,
     pub items: Option<Vec<MixItemInput>>,
-    // When present, all three per-size prices are set (a null clears one).
+    // When present, every per-size price is set (a null clears one).
     pub prices: Option<ScentPrices>,
 }
 
@@ -176,11 +177,11 @@ pub async fn update(
         validate_formula(&state.db, items).await?;
     }
 
-    let (set_prices, p3_4, p1_7, roller) = match &body.prices {
-        Some(p) => (true, p.oz3_4, p.oz1_7, p.roller),
-        None => (false, None, None, None),
+    let (set_prices, p3_4, p1_7, roller, spray) = match &body.prices {
+        Some(p) => (true, p.oz3_4, p.oz1_7, p.roller, p.spray),
+        None => (false, None, None, None, None),
     };
-    for price in [p3_4, p1_7, roller].into_iter().flatten() {
+    for price in [p3_4, p1_7, roller, spray].into_iter().flatten() {
         if price < Decimal::ZERO {
             return Err(AppError::BadRequest("prices can't be negative".into()));
         }
@@ -194,7 +195,8 @@ pub async fn update(
           active = coalesce($3, active),
           price_oz3_4  = case when $4 then $5 else price_oz3_4 end,
           price_oz1_7  = case when $4 then $6 else price_oz1_7 end,
-          price_roller = case when $4 then $7 else price_roller end
+          price_roller = case when $4 then $7 else price_roller end,
+          price_spray  = case when $4 then $8 else price_spray end
         where id = $1 returning *
         "#,
     )
@@ -205,6 +207,7 @@ pub async fn update(
     .bind(p3_4)
     .bind(p1_7)
     .bind(roller)
+    .bind(spray)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::NotFound("scent not found".into()))?;

@@ -70,8 +70,14 @@ Open the site, paste the token on the pairing screen, and it is kept in
 
 - **Intake** — customer details, marketing consent, scent preferences, and the order
   (type, bottle size, status, amount). Custom mixes use the mix builder, capped at 8
-  ingredients. Amounts are entered as the 3.4oz base formula; the 1.7oz and roller
-  amounts are shown derived, never stored.
+  ingredients. Amounts are entered as the 3.4oz base formula; every other size is
+  shown derived, never stored.
+
+  Four bottle sizes: **3.4 oz** (the base), **1.7 oz** (half), **Roller** (a tenth
+  = 10 ml), and **Spray (10 ml)**. Roller and Spray are the same volume and so take
+  the same pour — they differ only in the closure (rollerball vs atomiser) and in
+  price, which is set per size on each scent and, for bespoke blends, globally in
+  Admin. A size with no price set is simply not offered for sale.
 - **Lookup** — search customers by email, see their saved mixes and orders, and
   "Reorder" a mix to open intake with that customer and mix prefilled.
 - **Admin** — manage the ingredient and scent catalogs (add, activate/deactivate).

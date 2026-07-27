@@ -16,7 +16,8 @@ pub struct Mix {
 }
 
 /// amount_ml is the ingredient's amount in the base 3.4oz formula. The 1.7oz
-/// bottle is half of this and the roller is a tenth; both are derived, never stored.
+/// bottle is half of this; the roller and the 10 ml spray are a tenth. All are
+/// derived at read/order time, never stored per size.
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct MixItem {
     pub mix_id: Uuid,

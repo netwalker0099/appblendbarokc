@@ -7,4 +7,5 @@ pub struct Settings {
     pub custom_price_oz3_4: Option<Decimal>,
     pub custom_price_oz1_7: Option<Decimal>,
     pub custom_price_roller: Option<Decimal>,
+    pub custom_price_spray: Option<Decimal>,
 }

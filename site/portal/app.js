@@ -8,6 +8,7 @@
     ['oz3_4', '3.4 oz'],
     ['oz1_7', '1.7 oz'],
     ['roller', 'Roller'],
+    ['spray', 'Spray · 10 ml'],
   ]
 
   async function api(path, opts = {}) {

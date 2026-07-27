@@ -20,8 +20,9 @@ pub enum OrderStatus {
     Fulfilled,
 }
 
-/// The 1.7oz amount is half the base formula and the roller is a tenth of it;
-/// this only records which bottle was ordered, not the derived amounts.
+/// The 1.7oz amount is half the base formula; the roller and the spray are a
+/// tenth of it. This only records which bottle was ordered, not the derived
+/// amounts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "text")]
 pub enum BottleSize {
@@ -34,6 +35,11 @@ pub enum BottleSize {
     #[sqlx(rename = "roller")]
     #[serde(rename = "roller")]
     Roller,
+    /// 10 ml with a spray top. Physically the same volume as the roller and so
+    /// the same pour — only the closure and the price differ.
+    #[sqlx(rename = "spray")]
+    #[serde(rename = "spray")]
+    Spray,
 }
 
 impl OrderType {
@@ -51,6 +57,43 @@ impl BottleSize {
             BottleSize::Oz3_4 => "3.4 oz",
             BottleSize::Oz1_7 => "1.7 oz",
             BottleSize::Roller => "Roller",
+            BottleSize::Spray => "Spray (10 ml)",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_size_has_a_distinct_human_label() {
+        // Roller and Spray share a pour but must never share a label — an
+        // operator reading "Roller" on a spray order would build the wrong thing.
+        let labels = [
+            BottleSize::Oz3_4.label(),
+            BottleSize::Oz1_7.label(),
+            BottleSize::Roller.label(),
+            BottleSize::Spray.label(),
+        ];
+        let mut unique = labels.to_vec();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), labels.len(), "duplicate size label: {labels:?}");
+        assert_eq!(BottleSize::Spray.label(), "Spray (10 ml)");
+    }
+
+    #[test]
+    fn size_wire_format_is_stable() {
+        // These strings are persisted in orders.size and sent by the public
+        // share page; changing one silently breaks stored rows and live clients.
+        for (size, wire) in [
+            (BottleSize::Oz3_4, "\"oz3_4\""),
+            (BottleSize::Oz1_7, "\"oz1_7\""),
+            (BottleSize::Roller, "\"roller\""),
+            (BottleSize::Spray, "\"spray\""),
+        ] {
+            assert_eq!(serde_json::to_string(&size).unwrap(), wire);
         }
     }
 }

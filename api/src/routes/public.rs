@@ -38,6 +38,7 @@ pub struct PublicScent {
     pub price_oz3_4: Option<Decimal>,
     pub price_oz1_7: Option<Decimal>,
     pub price_roller: Option<Decimal>,
+    pub price_spray: Option<Decimal>,
 }
 
 pub async fn scent(
@@ -65,6 +66,7 @@ pub async fn scent(
         price_oz3_4: scent.price_oz3_4,
         price_oz1_7: scent.price_oz1_7,
         price_roller: scent.price_roller,
+        price_spray: scent.price_spray,
     }))
 }
 
@@ -136,6 +138,7 @@ pub async fn checkout(
         BottleSize::Oz3_4 => scent.price_oz3_4,
         BottleSize::Oz1_7 => scent.price_oz1_7,
         BottleSize::Roller => scent.price_roller,
+        BottleSize::Spray => scent.price_spray,
     }
     .ok_or_else(|| AppError::BadRequest("that size is not available for this scent".into()))?;
 
