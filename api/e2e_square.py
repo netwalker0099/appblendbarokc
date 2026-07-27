@@ -396,6 +396,49 @@ def main():
         f"{status} {found}",
     )
 
+    print("\n== chat notification targets ==")
+    # The SSRF guard is the reason this endpoint is safe: an admin supplies a URL
+    # and the server fetches it. Only real chat hosts may be reached.
+    for bad, why in [
+        ("http://discord.com/api/webhooks/1/a", "plaintext http"),
+        ("https://127.0.0.1/x", "loopback"),
+        ("https://169.254.169.254/latest/meta-data/", "cloud metadata"),
+        ("https://discord.com.evil.example/x", "lookalike host"),
+        ("https://hooks.slack.com@evil.example/x", "credential disguise"),
+    ]:
+        status, _ = call(
+            "POST",
+            "/api/notifications/targets",
+            {"label": "bad", "platform": "discord", "webhook_url": bad},
+        )
+        check(f"rejects {why}", status == 400, f"got {status} for {bad}")
+
+    status, created = call(
+        "POST",
+        "/api/notifications/targets",
+        {
+            "label": "e2e-temp",
+            "platform": "discord",
+            "webhook_url": "https://discord.com/api/webhooks/000/e2e-not-a-real-hook",
+        },
+    )
+    check("accepts a well-formed discord webhook", status == 201, f"{status} {created}")
+    if status == 201:
+        target_id = created["id"]
+        # A webhook URL is a bearer credential: holding it is enough to post to
+        # the channel, so it must never come back out of the API.
+        blob = json.dumps(created)
+        check(
+            "webhook URL is never returned to the browser",
+            "e2e-not-a-real-hook" not in blob,
+            blob[:200],
+        )
+        check("a redacted hint is returned instead", bool(created.get("url_hint")))
+        check("customer email is off by default", created["include_customer_email"] is False)
+
+        status, _ = call("DELETE", f"/api/notifications/targets/{target_id}")
+        check("target can be removed", status == 204, f"got {status}")
+
     print("\n== webhook receiver is refusing unsigned calls ==")
     status, body = call("POST", "/api/webhooks/square", {"event_id": "x", "type": "payment.updated"})
     check(

@@ -61,15 +61,26 @@ docker compose exec caddy wget -qO- http://api:8080/api/health
 
 ## Operator UI
 
-The UI is operator-driven: staff run it on the stand tablet. It needs a device token
-before it will do anything.
+The UI is operator-driven: staff run it on the stand tablet. Every operator route
+requires a signed-in **employee** with MFA completed.
+
+Create the first admin, then sign in through the UI:
 
 ```bash
-docker compose exec api blendbar-api issue-device-token "Stand iPad"
+docker compose exec api blendbar-api create-admin someone@theblendbarokc.com
+# prints a one-time temporary password
 ```
 
-Open the site, paste the token on the pairing screen, and it is kept in
-`localStorage` until "Unpair" is used or the API rejects it (a 401 forces re-pairing).
+On first sign-in the app walks the employee through TOTP enrolment (scan the QR
+with any authenticator app); after that, login is password + 6-digit code. The
+session lives in an httpOnly cookie, not in `localStorage`, and admins manage
+further accounts from **Admin → Team**.
+
+> **Superseded:** an earlier build paired tablets with a device token
+> (`issue-device-token` + a paste-the-token screen). That model was replaced by
+> employee accounts in Phase 2b. The CLI subcommand still exists but nothing
+> checks the tokens it issues — `auth::require_operator_token` is dead code kept
+> only until the subcommand is removed. Do not build against it.
 
 - **Intake** — customer details, marketing consent, scent preferences, and the order
   (type, bottle size, status, amount). Custom mixes use the mix builder, capped at 8
@@ -222,6 +233,58 @@ state directly; that button is also the recovery path for a webhook lost to a de
 
 - `GET /api/square/status` — backend, live-vs-mock, webhook state, cart counts.
 - `GET /api/square/events` — recent inbound webhooks, for debugging.
+
+## Chat notifications (Discord / Slack / Teams)
+
+Posts to a chat channel when **a customer** does something. Two events, and only
+two:
+
+| Event | Fires when | Why it earns an interruption |
+|---|---|---|
+| `sale.online` | A cart with no employee behind it is paid — i.e. bought from a `/s/<id>` share link | Nobody was at the till, and the blend does not exist yet |
+| `event.booked` | A cart containing an `event_deposit` line is paid | The published booking terms say *"Without a deposit, your event is not booked"* — that payment **is** the booking |
+
+**A sale rung up at the bar does not notify.** The staff member who took it is
+standing right there; announcing it is noise, and a channel full of noise stops
+being read. The discriminator is `carts.created_by`: null means the public
+checkout built it, set means an employee did.
+
+An event deposit notifies either way, because staff raise the invoice but the
+customer decides when to pay it — and that moment is what the calendar needs.
+
+Managed in **Admin → Chat notifications**: add a channel, send a test message,
+pause it, or remove it. Per channel you choose which events it receives and
+whether the customer's email is included.
+
+### How it is kept safe
+
+- **The webhook URL is a bearer credential** — anyone holding it can post to the
+  channel. It is stored server-side and never returned to the browser; the API
+  gives back a redacted hint (`discord.com/…abcd`) instead.
+- **Host allowlist per platform**, not a private-IP blocklist. This endpoint takes
+  a URL from an admin and makes the server fetch it, which is textbook SSRF. A
+  blocklist must anticipate every spelling of an internal address; an allowlist
+  only has to name the hosts that are ever correct. Non-https, credentials in the
+  URL (`https://hooks.slack.com@evil.example/…`), and lookalike domains
+  (`discord.com.evil.example`) are all rejected.
+- **Customer email is off by default.** The order details are enough to act on,
+  and a chat channel is a third party — sending PII there should be a decision
+  someone makes, not something that happens quietly.
+- **Delivery runs on the background worker**, never on the payment path: a Discord
+  outage must not be able to fail a customer's checkout.
+- **Deduped on `(target, cart, event)`.** Payment settlement is idempotent and may
+  run again (webhook redelivery, staff pressing "Check Square"), so without this
+  one payment could ping the channel repeatedly.
+
+`cart_items.kind` (`blend` / `event_deposit` / `fee` / `other`) is what makes the
+deposit trigger reliable. It is set explicitly by the operator — matching a
+deposit on its free-text label would break the first time someone retyped it.
+
+> **Teams note:** the payload is an Office 365 connector *MessageCard*, which is
+> what a Teams **Incoming Webhook** accepts. Microsoft is retiring those in favour
+> of Workflows (Power Automate), which take Adaptive Cards instead. Existing
+> connector URLs still work; a channel migrated to a Workflow URL will need a new
+> payload shape.
 
 ### Contact sync
 

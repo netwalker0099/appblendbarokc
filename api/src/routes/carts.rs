@@ -44,7 +44,22 @@ pub struct AdHocItemInput {
     pub quantity: i32,
     /// Entered as a decimal (what the operator types); converted to cents here.
     pub unit_amount: Decimal,
+    /// What this line *is*: `event_deposit`, `fee`, or `other`. Explicit rather
+    /// than inferred from the label, because a deposit settling is what triggers
+    /// the "event booked" notification and matching on free text would break the
+    /// first time someone retyped it.
+    #[serde(default = "other_kind")]
+    pub kind: String,
 }
+
+fn other_kind() -> String {
+    "other".to_string()
+}
+
+/// Kinds an operator may set on an ad-hoc line. `blend` is excluded: that kind
+/// belongs to lines carrying an `order_id`, and is set by this module, not by a
+/// client.
+const AD_HOC_KINDS: [&str; 3] = ["event_deposit", "fee", "other"];
 
 fn one() -> i32 {
     1
@@ -83,7 +98,8 @@ pub async fn create(
 
     // Build every line before opening the transaction, so a bad request fails
     // cleanly instead of half-writing a cart.
-    let mut lines: Vec<(Option<Uuid>, String, i32, i64)> = Vec::new();
+    // (order_id, name, quantity, unit cents, kind)
+    let mut lines: Vec<(Option<Uuid>, String, i32, i64, &str)> = Vec::new();
 
     for order_id in &body.order_ids {
         let order = sqlx::query_as::<_, Order>("select * from orders where id = $1")
@@ -112,6 +128,7 @@ pub async fn create(
             format!("{} ({})", order.order_type.label(), order.size.label()),
             1,
             cents,
+            "blend",
         ));
     }
 
@@ -126,10 +143,23 @@ pub async fn create(
         let cents = money::to_cents(item.unit_amount).ok_or_else(|| {
             AppError::BadRequest(format!("invalid amount for \"{name}\": {}", item.unit_amount))
         })?;
-        lines.push((None, name.to_string(), item.quantity, cents));
+
+        let kind = AD_HOC_KINDS
+            .iter()
+            .find(|k| **k == item.kind)
+            .copied()
+            .ok_or_else(|| {
+                AppError::BadRequest(format!(
+                    "unknown line kind '{}' — expected one of {}",
+                    item.kind,
+                    AD_HOC_KINDS.join(", ")
+                ))
+            })?;
+
+        lines.push((None, name.to_string(), item.quantity, cents, kind));
     }
 
-    let total: i64 = lines.iter().map(|(_, _, q, c)| c * *q as i64).sum();
+    let total: i64 = lines.iter().map(|(_, _, q, c, _)| c * *q as i64).sum();
 
     let mut tx = state.db.begin().await?;
 
@@ -152,11 +182,11 @@ pub async fn create(
     .await?;
 
     let mut items = Vec::with_capacity(lines.len());
-    for (order_id, name, quantity, unit_amount_cents) in lines {
+    for (order_id, name, quantity, unit_amount_cents, kind) in lines {
         let item = sqlx::query_as::<_, CartItem>(
             r#"
-            insert into cart_items (cart_id, order_id, name, quantity, unit_amount_cents)
-            values ($1, $2, $3, $4, $5)
+            insert into cart_items (cart_id, order_id, name, quantity, unit_amount_cents, kind)
+            values ($1, $2, $3, $4, $5, $6)
             returning *
             "#,
         )
@@ -165,6 +195,7 @@ pub async fn create(
         .bind(&name)
         .bind(quantity)
         .bind(unit_amount_cents)
+        .bind(kind)
         .fetch_one(&mut *tx)
         .await
         // The unique index on cart_items.order_id is the double-billing guard.

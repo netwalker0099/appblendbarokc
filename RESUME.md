@@ -594,6 +594,57 @@ them (Admin → per-scent Prices, and Custom blend pricing), the spray option wi
 not appear on share pages and a spray order cannot be carted. That is deliberate —
 the app will not invent a price.
 
+## Milestone 12: chat notifications + README auth fix (2026-07-27)
+
+**README fix.** The "Operator UI" section still documented device-token pairing
+(`issue-device-token`, paste-the-token screen, `localStorage`), which Phase 2b
+replaced with employee accounts + TOTP. Anyone onboarding would have tried an auth
+path that no longer exists. Rewritten to the real flow, with an explicit
+*superseded* note: the CLI subcommand still exists but nothing checks the tokens
+it issues, and `auth::require_operator_token` is dead code kept only until the
+subcommand goes.
+
+**Notifications.** `notify::` posts to Discord / Slack / Teams on two events:
+
+- `sale.online` — a cart with `created_by is null` is paid. That column is the
+  "no employee involved" test: the public share-page checkout leaves it null,
+  operator checkout sets it.
+- `event.booked` — a cart containing an `event_deposit` line is paid. Fires
+  regardless of who built the cart, because the owner's own published terms say
+  the event is not booked until the deposit is paid.
+
+**Sales at the bar deliberately do not notify** — the staff member is standing
+there, and a noisy channel is an ignored channel. This was the explicit ask
+("triggered by a customer but not by an employee").
+
+**There is still no event *booking* flow.** The site's "Book an Event" section
+links to Instagram DMs; nothing in the app captures an enquiry. `event.booked`
+therefore fires at deposit payment, which is the first moment the app knows about
+an event at all. If notification-at-enquiry is wanted, a booking form has to exist
+first — that is separate work.
+
+**Schema (0013).** `cart_items.kind` (`blend`/`event_deposit`/`fee`/`other`) —
+explicit, because matching a deposit on its free-text label breaks the first time
+someone retypes it; the migration back-fills historical rows by label as a
+best-effort. Plus `notification_targets` and `notification_deliveries` (queue +
+audit + dedup in one table, unique on `(target, cart, event)`).
+
+**Security.** The webhook URL is a bearer credential, so it is write-only from the
+browser — the API returns a redacted hint, never the URL. URLs are validated
+against a **per-platform host allowlist** rather than a private-IP blocklist:
+this is an admin-supplied URL the server fetches, i.e. textbook SSRF, and a
+blocklist has to anticipate every spelling of an internal address. Rejects
+non-https, `user@host` disguises, lookalikes (`discord.com.evil.example`),
+loopback, and cloud metadata. Customer email is opt-in, off by default.
+
+**Verified 2026-07-27.** 49 unit tests (16 new) + 60 E2E checks. Behaviour proven
+live against the running stack: a public cart queued `sale.online` only; a staff
+cart with a deposit queued `event.booked` only and *not* `sale.online`;
+re-settling both produced no duplicates. Delivery reached **api.discord.com and
+came back 404 "Unknown Webhook"** — a real response from Discord, so the outbound
+transport, TLS and payload are proven; only a valid webhook URL is missing.
+Unlike Square, this integration *has* touched its real third party.
+
 ## Not started
 
 ## Security posture (reviewed 2026-07-24)

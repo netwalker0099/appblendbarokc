@@ -5,6 +5,7 @@ mod db;
 mod employee_auth;
 mod error;
 mod models;
+mod notify;
 mod ratelimit;
 mod routes;
 mod square;

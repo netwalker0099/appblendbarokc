@@ -71,6 +71,10 @@ pub struct CartItem {
     pub name: String,
     pub quantity: i32,
     pub unit_amount_cents: i64,
+    /// `blend` | `event_deposit` | `fee` | `other`. Set explicitly rather than
+    /// inferred from `name`: a settled `event_deposit` is what marks an event as
+    /// booked, and matching that on free text would break on a retyped label.
+    pub kind: String,
     pub created_at: DateTime<Utc>,
 }
 

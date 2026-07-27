@@ -218,8 +218,8 @@ pub async fn checkout(
     .await?;
 
     sqlx::query(
-        "insert into cart_items (cart_id, order_id, name, quantity, unit_amount_cents) \
-         values ($1, $2, $3, 1, $4)",
+        "insert into cart_items (cart_id, order_id, name, quantity, unit_amount_cents, kind) \
+         values ($1, $2, $3, 1, $4, 'blend')",
     )
     .bind(cart.id)
     .bind(order.id)

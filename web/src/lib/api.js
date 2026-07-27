@@ -91,6 +91,20 @@ export const api = {
   },
   reconcileHistory: () => request('/square/reconcile/history'),
   listSquareEvents: () => request('/square/events'),
+
+  // --- Chat notifications for customer-triggered events (admin) ---
+  // Webhook URLs are write-only: the server returns a redacted hint, never the
+  // URL itself, because holding one is enough to post into the channel.
+  listNotificationTargets: () => request('/notifications/targets'),
+  createNotificationTarget: (body) =>
+    request('/notifications/targets', { method: 'POST', body }),
+  updateNotificationTarget: (id, patch) =>
+    request(`/notifications/targets/${id}`, { method: 'PATCH', body: patch }),
+  deleteNotificationTarget: (id) =>
+    request(`/notifications/targets/${id}`, { method: 'DELETE' }),
+  testNotificationTarget: (id) =>
+    request(`/notifications/targets/${id}/test`, { method: 'POST' }),
+  listNotificationDeliveries: () => request('/notifications/recent'),
   listCustomers: (email) =>
     request(email ? `/customers?email=${encodeURIComponent(email)}` : '/customers'),
   getCustomer: (id) => request(`/customers/${id}`),

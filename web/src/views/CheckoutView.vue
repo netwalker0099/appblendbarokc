@@ -108,16 +108,22 @@ function toggle(order) {
 }
 
 function addExtra() {
-  extras.value.push({ name: '', unit_amount: '', quantity: 1 })
+  extras.value.push({ name: '', unit_amount: '', quantity: 1, kind: 'other' })
 }
 
 function removeExtra(index) {
   extras.value.splice(index, 1)
 }
 
-/** Common non-bottle lines, straight from the published booking terms. */
-function addPreset(name) {
-  extras.value.push({ name, unit_amount: '', quantity: 1 })
+/**
+ * Common non-bottle lines, straight from the published booking terms.
+ *
+ * `kind` is what matters here, not the label: a paid `event_deposit` is what
+ * marks an event as booked and fires the chat notification, so it is carried
+ * explicitly rather than guessed from the wording.
+ */
+function addPreset(name, kind) {
+  extras.value.push({ name, unit_amount: '', quantity: 1, kind })
 }
 
 const selectedOrders = computed(() =>
@@ -159,6 +165,7 @@ async function createAndCheckout() {
           name: e.name.trim(),
           quantity: Number(e.quantity) || 1,
           unit_amount: String(e.unit_amount),
+          kind: e.kind || 'other',
         })),
     }
     cart.value = await api.createCart(body)
@@ -356,13 +363,28 @@ watch(customer, () => {
       </p>
 
       <div class="row" style="flex-wrap: wrap; gap: 0.5rem">
-        <button class="ghost" type="button" style="flex: none" @click="addPreset('Event deposit (50%)')">
+        <button
+          class="ghost"
+          type="button"
+          style="flex: none"
+          @click="addPreset('Event deposit (50%)', 'event_deposit')"
+        >
           + Event deposit
         </button>
-        <button class="ghost" type="button" style="flex: none" @click="addPreset('Rush / administrative fee')">
+        <button
+          class="ghost"
+          type="button"
+          style="flex: none"
+          @click="addPreset('Rush / administrative fee', 'fee')"
+        >
           + Rush fee
         </button>
-        <button class="ghost" type="button" style="flex: none" @click="addPreset('Hotel room — product storage')">
+        <button
+          class="ghost"
+          type="button"
+          style="flex: none"
+          @click="addPreset('Hotel room — product storage', 'fee')"
+        >
           + Hotel room
         </button>
         <button class="ghost" type="button" style="flex: none" @click="addExtra">
@@ -371,6 +393,11 @@ watch(customer, () => {
       </div>
 
       <div v-for="(extra, i) in extras" :key="i" class="extra-row">
+        <select v-model="extra.kind" aria-label="Line type" class="kind">
+          <option value="other">Other</option>
+          <option value="event_deposit">Event deposit</option>
+          <option value="fee">Fee</option>
+        </select>
         <input v-model="extra.name" type="text" placeholder="Description" aria-label="Line description" />
         <input
           v-model="extra.quantity"
@@ -497,6 +524,11 @@ watch(customer, () => {
 
 .extra-row input {
   min-width: 0;
+}
+
+.extra-row .kind {
+  width: 8.5rem;
+  flex: none;
 }
 
 .extra-row .qty {

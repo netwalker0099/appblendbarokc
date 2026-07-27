@@ -66,10 +66,23 @@ pub async fn run_worker(state: AppState) {
         "sync worker started (square backend: {})",
         state.square.name()
     );
+    // One client for the life of the worker, so chat webhooks reuse connections
+    // instead of renegotiating TLS per message.
+    let http = reqwest::Client::builder()
+        .user_agent("blendbar-app/0.2")
+        .build()
+        .expect("failed to build notification http client");
+
     let mut tick: u32 = 0;
     loop {
         if let Err(e) = drain_once(&state).await {
             tracing::error!("sync worker poll failed: {e}");
+        }
+
+        // Chat notifications for customer-triggered events. Kept on the worker,
+        // never on the payment path — a Discord outage must not fail a checkout.
+        if let Err(e) = crate::notify::drain(&state.db, &http).await {
+            tracing::error!("notification drain failed: {e}");
         }
 
         if tick % EXPIRY_EVERY == 0 {

@@ -111,6 +111,12 @@ pub async fn apply_payment(
             .execute(&mut *tx)
             .await?;
 
+            // Queue chat notifications inside the same transaction, so nothing
+            // is announced for a payment that then rolls back. Deduped on
+            // (target, cart, event), because settlement is idempotent and may
+            // run more than once for a single customer payment.
+            crate::notify::enqueue_for_paid_cart(&mut *tx, &cart).await?;
+
             // Flag a short payment rather than silently accepting it. This is
             // the single most useful signal the integration produces: it means
             // the amount charged did not match the amount quoted.

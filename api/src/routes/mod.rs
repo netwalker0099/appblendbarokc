@@ -6,6 +6,7 @@ pub mod employees;
 pub mod ingredients;
 pub mod intake;
 pub mod mixes;
+pub mod notifications;
 pub mod orders;
 pub mod public;
 pub mod reconciliation;
@@ -56,6 +57,17 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/square/reconcile", get(reconciliation::reconcile))
         .route("/api/square/reconcile/history", get(reconciliation::history))
         .route("/api/square/events", get(square_webhooks::recent))
+        // Chat notifications for customer-triggered events (admin-only).
+        .route(
+            "/api/notifications/targets",
+            get(notifications::list).post(notifications::create),
+        )
+        .route(
+            "/api/notifications/targets/:id",
+            patch(notifications::update).delete(notifications::delete),
+        )
+        .route("/api/notifications/targets/:id/test", post(notifications::test))
+        .route("/api/notifications/recent", get(notifications::recent))
         .route("/api/sync/status", get(sync::status))
         .route("/api/sync/retry", post(sync::retry))
         .route("/api/admin/backup", get(admin::backup))

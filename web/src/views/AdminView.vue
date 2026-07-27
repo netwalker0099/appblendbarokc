@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import CatalogManager from '../components/CatalogManager.vue'
+import NotificationManager from '../components/NotificationManager.vue'
 import ScentManager from '../components/ScentManager.vue'
 import TeamManager from '../components/TeamManager.vue'
 import { INGREDIENT_TYPES } from '../lib/bottle.js'
@@ -17,6 +18,7 @@ const employees = ref([])
 const sync = ref(null)
 const square = ref(null)
 const squareEvents = ref([])
+const notificationTargets = ref([])
 const report = ref(null)
 const reconciling = ref(false)
 // Default the reconciliation window to the last 7 days, as YYYY-MM-DD.
@@ -46,7 +48,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [ing, sc, emp, set, st, sq, ev] = await Promise.all([
+    const [ing, sc, emp, set, st, sq, ev, nt] = await Promise.all([
       api.listIngredients(),
       api.listScents(),
       api.listEmployees(),
@@ -54,7 +56,9 @@ async function load() {
       api.getSyncStatus(),
       api.getSquareStatus(),
       api.listSquareEvents(),
+      api.listNotificationTargets(),
     ])
+    notificationTargets.value = nt
     ingredients.value = ing
     scents.value = sc
     employees.value = emp
@@ -74,6 +78,14 @@ async function load() {
 function handle(err) {
   error.value = err.message
   if (err.status === 401) router.push({ name: 'login' })
+}
+
+async function reloadNotifications() {
+  try {
+    notificationTargets.value = await api.listNotificationTargets()
+  } catch (err) {
+    handle(err)
+  }
 }
 
 async function reloadTeam() {
@@ -529,6 +541,8 @@ function formatTime(value) {
         </p>
       </template>
     </div>
+
+    <NotificationManager :targets="notificationTargets" @changed="reloadNotifications" />
 
     <div class="card">
       <h2>Recent Square events</h2>
