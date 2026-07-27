@@ -191,6 +191,22 @@ pub async fn intake(
         None
     };
 
+    // Price from the catalogue unless the operator typed an explicit override.
+    // Without this an order is saved unpriced and cannot be sold, even though the
+    // price is sitting in Admin.
+    let amount = match body.order.amount {
+        Some(a) => Some(a),
+        None => {
+            crate::pricing::catalog_price(
+                &mut *tx,
+                body.order.order_type,
+                body.order.size,
+                body.order.scent_id,
+            )
+            .await?
+        }
+    };
+
     let order = sqlx::query_as::<_, Order>(
         r#"
         insert into orders (customer_id, type, size, mix_id, scent_id, status, amount, idempotency_key)
@@ -204,7 +220,7 @@ pub async fn intake(
     .bind(mix_detail.as_ref().map(|m| m.mix.id))
     .bind(body.order.scent_id)
     .bind(body.order.status)
-    .bind(body.order.amount)
+    .bind(amount)
     .bind(&idempotency_key)
     .fetch_one(&mut *tx)
     .await?;

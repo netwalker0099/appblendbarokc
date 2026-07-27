@@ -132,15 +132,15 @@ pub async fn checkout(
         .await?
         .ok_or_else(|| AppError::NotFound("scent not found".into()))?;
 
-    // The price comes from the database, keyed on the requested size. This is the
-    // line that makes the endpoint safe to expose.
-    let price = match body.size {
-        BottleSize::Oz3_4 => scent.price_oz3_4,
-        BottleSize::Oz1_7 => scent.price_oz1_7,
-        BottleSize::Roller => scent.price_roller,
-        BottleSize::Spray => scent.price_spray,
-    }
-    .ok_or_else(|| AppError::BadRequest("that size is not available for this scent".into()))?;
+    // The price comes from the catalogue, keyed on the requested size. This is
+    // the line that makes the endpoint safe to expose — the request cannot
+    // influence it.
+    let price =
+        crate::pricing::catalog_price(&state.db, OrderType::SetPerfume, body.size, Some(scent.id))
+            .await?
+            .ok_or_else(|| {
+                AppError::BadRequest("that size is not available for this scent".into())
+            })?;
 
     let cents = money::to_cents(price)
         .ok_or_else(|| AppError::Internal(format!("scent {} has an invalid price", scent.id)))?;

@@ -6,6 +6,7 @@ mod employee_auth;
 mod error;
 mod models;
 mod notify;
+mod pricing;
 mod ratelimit;
 mod routes;
 mod square;

@@ -114,11 +114,27 @@ pub async fn create(
             )));
         }
 
-        let amount = order.amount.ok_or_else(|| {
-            AppError::BadRequest(format!(
-                "order {order_id} has no amount — price it before selling it"
-            ))
-        })?;
+        // Fall back to the catalogue when the order carries no amount of its own.
+        // Orders taken before pricing was wired up have `amount = null`, and the
+        // right price for them is the one configured in Admin — refusing the sale
+        // and making staff retype a price they have already set is not.
+        let amount = match order.amount {
+            Some(a) => a,
+            None => crate::pricing::catalog_price(
+                &state.db,
+                order.order_type,
+                order.size,
+                order.scent_id,
+            )
+            .await?
+            .ok_or_else(|| {
+                AppError::BadRequest(format!(
+                    "no price for a {} in {} — set one in Admin, or give this order an amount",
+                    order.order_type.label().to_lowercase(),
+                    order.size.label()
+                ))
+            })?,
+        };
         let cents = money::to_cents(amount).ok_or_else(|| {
             AppError::BadRequest(format!("order {order_id} has an invalid amount: {amount}"))
         })?;
