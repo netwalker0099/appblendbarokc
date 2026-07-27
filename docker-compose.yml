@@ -45,9 +45,14 @@ services:
       CUSTOMER_SITE_URL: ${CUSTOMER_SITE_URL:-https://sandbox.theblendbarokc.com}
       RUST_LOG: info
     volumes:
-      # The service-account key, mounted read-only. Harmless when unset: the
+      # A key supplied via .env, mounted read-only. Harmless when unset: the
       # default path is a file that does not exist, and the app then falls back.
       - ${GOOGLE_SA_KEY_HOST_PATH:-/dev/null}:/run/secrets/google-sa.json:ro
+      # A key uploaded through Admin > Email lands here. A named volume so it
+      # survives the container being recreated on every deploy, and so the
+      # credential never lives in Postgres — where it would be copied into every
+      # downloaded database backup.
+      - email_secrets:/var/lib/blendbar/secrets
     expose:
       - "8080"
     healthcheck:
@@ -76,5 +81,6 @@ services:
 
 volumes:
   pgdata:
+  email_secrets:
   caddy_data:
   caddy_config:

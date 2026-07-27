@@ -128,6 +128,10 @@ export const api = {
   updateEmailSettings: (patch) => request('/email/settings', { method: 'PATCH', body: patch }),
   sendTestEmail: (to) => request('/email/test', { method: 'POST', body: { to } }),
   listEmailDeliveries: () => request('/email/recent'),
+  // The key is written to a file server-side and never returned; responses carry
+  // only the service-account address.
+  connectGoogle: (body) => request('/email/google', { method: 'POST', body }),
+  disconnectGoogle: () => request('/email/google', { method: 'DELETE' }),
 
   // Mark an order ready to collect; queues the customer's "it's ready" email.
   fulfilOrder: (id) => request(`/orders/${id}/fulfil`, { method: 'POST' }),

@@ -55,6 +55,19 @@ pub struct ServiceAccount {
     pub private_key_id: String,
 }
 
+/// Written by hand rather than derived: a derived `Debug` would print the
+/// private key in full the first time anything logged this struct, or a panic
+/// unwound through it.
+impl std::fmt::Debug for ServiceAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServiceAccount")
+            .field("client_email", &self.client_email)
+            .field("private_key_id", &self.private_key_id)
+            .field("private_key", &"<redacted>")
+            .finish()
+    }
+}
+
 #[derive(Serialize)]
 struct Assertion<'a> {
     iss: &'a str,

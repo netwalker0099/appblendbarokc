@@ -24,6 +24,8 @@ const form = reactive({
   order_ready_enabled: true,
 })
 const testTo = ref('')
+const saJson = ref('')
+const impersonate = ref('')
 const busy = ref('')
 const error = ref('')
 const notice = ref('')
@@ -36,11 +38,57 @@ watch(
     form.from_name = s.settings.from_name ?? ''
     form.reply_to = s.settings.reply_to ?? ''
     form.order_ready_enabled = s.settings.order_ready_enabled
+    impersonate.value = s.google?.impersonate ?? ''
   },
   { immediate: true, deep: true },
 )
 
 const live = computed(() => Boolean(props.state?.live))
+const google = computed(() => props.state?.google ?? {})
+// When the key comes from the server's .env the browser must not pretend it can
+// change it — two sources of truth for a credential is how they drift apart.
+const envManaged = computed(() => Boolean(google.value.env_managed))
+
+async function connectGoogle() {
+  if (!saJson.value.trim() || !impersonate.value.trim()) {
+    error.value = 'Paste the service account key and enter the mailbox to send as.'
+    return
+  }
+  busy.value = 'google'
+  error.value = ''
+  notice.value = ''
+  try {
+    const res = await api.connectGoogle({
+      service_account_json: saJson.value,
+      impersonate: impersonate.value.trim(),
+    })
+    // Cleared immediately: the key is stored server-side and there is no reason
+    // for it to sit in the page afterwards.
+    saJson.value = ''
+    notice.value = res.detail
+    emit('changed')
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    busy.value = ''
+  }
+}
+
+async function disconnectGoogle() {
+  if (!window.confirm('Disconnect Google? Email will stop sending until it is reconnected.')) return
+  busy.value = 'google'
+  error.value = ''
+  notice.value = ''
+  try {
+    await api.disconnectGoogle()
+    notice.value = 'Google disconnected.'
+    emit('changed')
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    busy.value = ''
+  }
+}
 const needsFrom = computed(() => !props.state?.settings?.from_address)
 
 async function save() {
@@ -92,10 +140,10 @@ function formatTime(value) {
     <p class="notice" v-if="notice">{{ notice }}</p>
 
     <dl class="summary" v-if="props.state">
-      <dt>Relay</dt>
+      <dt>Transport</dt>
       <dd>
         <span class="badge" :class="live ? 'ok-badge' : 'danger-badge'">
-          {{ live ? 'Connected' : 'Not configured — nothing is sent' }}
+          {{ live ? `Connected — ${props.state.transport}` : 'Not configured — nothing is sent' }}
         </span>
       </dd>
       <dt>Sender</dt>
@@ -114,20 +162,88 @@ function formatTime(value) {
       </dd>
     </dl>
 
-    <p class="muted" v-if="!live">
-      Set <code>SMTP_HOST</code> (and <code>SMTP_PORT</code>) in the server’s
-      <code>.env</code> and restart. For Google Workspace use
-      <code>smtp-relay.gmail.com</code> on port <code>587</code>, and allowlist this
-      server’s IP address in the Google Admin console under
-      <em>Apps → Google Workspace → Gmail → Routing → SMTP relay service</em>. With
-      IP allowlisting no username or password is needed. These are server-side
-      settings and can’t be changed from here.
+    <p class="muted" v-if="live">
+      Sign-in links for the customer portal are sent immediately. Everything else
+      is queued and retried.
     </p>
-    <p class="muted" v-else>
-      Sign-in links for the customer portal are sent immediately. Until a relay is
-      configured they are only written to the server log, which means nobody can
-      sign in to the portal.
+    <p class="muted danger-text" v-else>
+      Nothing is being sent. Sign-in links are only written to the server log,
+      which means nobody can get into the customer portal.
     </p>
+
+    <hr style="border: 0; border-top: 1px solid var(--border); margin: 1.2rem 0" />
+
+    <h3 style="margin-bottom: 0.6rem">Google connection</h3>
+
+    <dl class="summary" v-if="google.connected">
+      <dt>Service account</dt>
+      <dd><code>{{ google.service_account || 'set in the server environment' }}</code></dd>
+      <dt>Sending as</dt>
+      <dd><code>{{ google.impersonate || '—' }}</code></dd>
+    </dl>
+
+    <p class="muted" v-if="envManaged">
+      The key is configured in the server’s <code>.env</code>, which takes
+      precedence over anything set here. Remove <code>GOOGLE_SA_KEY_FILE</code> to
+      manage it from this page instead.
+    </p>
+
+    <template v-else>
+      <div class="field">
+        <label>Send as (Workspace mailbox)</label>
+        <input
+          v-model="impersonate"
+          type="email"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="hello@theblendbarokc.com"
+        />
+      </div>
+
+      <div class="field">
+        <label>Service account key (JSON)</label>
+        <textarea
+          v-model="saJson"
+          rows="5"
+          spellcheck="false"
+          autocomplete="off"
+          :placeholder="google.connected
+            ? 'Paste a new key here only if you are replacing the current one'
+            : 'Paste the whole downloaded JSON key file'"
+        ></textarea>
+      </div>
+      <p class="muted field-help">
+        Google Cloud → enable the <strong>Gmail API</strong> → create a
+        <strong>service account</strong> → Keys → Add key → JSON. Then in Google
+        Admin → Security → API controls → <strong>Domain-wide delegation</strong>,
+        authorise that service account’s client ID for the single scope
+        <code>https://www.googleapis.com/auth/gmail.send</code>.
+        The key is stored on the server as a file — never in the database, so it
+        can’t end up inside a downloaded backup — and is never shown again here.
+      </p>
+
+      <div class="row" style="gap: 0.5rem">
+        <button
+          class="ghost"
+          type="button"
+          style="flex: none"
+          :disabled="busy === 'google'"
+          @click="connectGoogle"
+        >
+          {{ busy === 'google' ? 'Connecting…' : google.connected ? 'Replace key' : 'Connect Google' }}
+        </button>
+        <button
+          v-if="google.connected"
+          class="ghost"
+          type="button"
+          style="flex: none"
+          :disabled="busy === 'google'"
+          @click="disconnectGoogle"
+        >
+          Disconnect
+        </button>
+      </div>
+    </template>
 
     <hr style="border: 0; border-top: 1px solid var(--border); margin: 1.2rem 0" />
 

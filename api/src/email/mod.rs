@@ -23,6 +23,7 @@
 //! integration, and for the same reason: the interesting logic stays testable on
 //! a box with no credentials.
 
+pub mod credentials;
 pub mod dispatch;
 pub mod gmail;
 pub mod templates;
@@ -231,11 +232,24 @@ impl Mailer for MockMailer {
 /// nothing to anyone" is how a business discovers its email is off by hearing
 /// about it from a customer.
 pub fn from_env() -> Arc<dyn Mailer> {
-    if let Some(loaded) = gmail::load_service_account() {
+    build(None)
+}
+
+/// Rebuild the mailer, optionally with the mailbox an admin configured in the
+/// database. Called at boot and again whenever credentials change, so saving them
+/// takes effect without a restart.
+pub fn build(stored_impersonate: Option<String>) -> Arc<dyn Mailer> {
+    // A key from the environment wins over one uploaded through the browser: an
+    // ops-managed deployment should not be silently overridden by a form, and if
+    // both exist the environment is the one an operator can actually see.
+    let loaded_key = gmail::load_service_account().or_else(credentials::load_stored);
+
+    if let Some(loaded) = loaded_key {
         let impersonate = std::env::var("GOOGLE_IMPERSONATE")
             .ok()
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+            .filter(|s| !s.is_empty())
+            .or(stored_impersonate);
 
         match (loaded, impersonate) {
             (Ok(account), Some(mailbox)) => {

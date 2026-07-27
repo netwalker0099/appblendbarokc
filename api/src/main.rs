@@ -38,9 +38,22 @@ pub struct AppState {
     /// Guards the one unauthenticated endpoint that writes rows and calls Square
     /// (the share-page checkout).
     pub public_checkout_limiter: Arc<ratelimit::RateLimiter>,
-    /// Outbound email. Falls back to a mock that logs instead of sending when no
-    /// SMTP relay is configured.
-    pub mailer: Arc<dyn Mailer>,
+    /// Outbound email. Swappable at runtime so an admin can connect Google from
+    /// the browser without a restart; read through [`AppState::mailer`].
+    pub mailer: Arc<std::sync::RwLock<Arc<dyn Mailer>>>,
+}
+
+impl AppState {
+    /// The current mailer. Cloned out under a short read lock — never hold the
+    /// lock across an await.
+    pub fn mailer(&self) -> Arc<dyn Mailer> {
+        self.mailer.read().expect("mailer lock poisoned").clone()
+    }
+
+    /// Replace the mailer after credentials change.
+    pub fn set_mailer(&self, mailer: Arc<dyn Mailer>) {
+        *self.mailer.write().expect("mailer lock poisoned") = mailer;
+    }
 }
 
 #[tokio::main]
@@ -141,7 +154,7 @@ async fn main() {
             10,
             std::time::Duration::from_secs(300),
         )),
-        mailer: email::from_env(),
+        mailer: Arc::new(std::sync::RwLock::new(email::from_env())),
     };
 
     // Push contacts to Square Customers and expire abandoned checkouts, for the

@@ -99,7 +99,7 @@ pub async fn request_link(
         // discover who is a customer.
         if let Err(e) = crate::email::dispatch::send_magic_link(
             &state.db,
-            state.mailer.as_ref(),
+            state.mailer().as_ref(),
             customer.id,
             &email,
             &link,

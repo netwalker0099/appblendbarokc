@@ -69,6 +69,12 @@ pub fn build_router(state: AppState) -> Router {
             get(email_admin::get).patch(email_admin::update),
         )
         .route("/api/email/test", post(email_admin::test))
+        // The service-account key is written to a file, never a DB column, so it
+        // stays out of the downloadable pg_dump backup.
+        .route(
+            "/api/email/google",
+            post(email_admin::connect_google).delete(email_admin::disconnect_google),
+        )
         .route("/api/email/recent", get(email_admin::recent))
         .route("/api/ingredients/:id/delete", post(deletions::delete_ingredient))
         .route("/api/scents/:id/delete", post(deletions::delete_scent))

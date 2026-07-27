@@ -279,15 +279,25 @@ out. A service account has no such moment.
 #### Setting up the Gmail API (preferred)
 
 1. Google Cloud console → new project → **enable the Gmail API** → create a
-   **service account** → download a JSON key.
+   **service account** → Keys → Add key → **JSON**.
 2. Google Admin → **Security → Access and data control → API controls →
    Domain-wide delegation → Add new**:
    - Client ID: the service account's numeric client ID
    - Scopes: `https://www.googleapis.com/auth/gmail.send`
-3. Put the key outside the repo, set `GOOGLE_SA_KEY_HOST_PATH` (host path, mounted
-   read-only into the container) and `GOOGLE_IMPERSONATE` to the mailbox to send
-   as. Restart the API.
-4. Set a **From address** in Admin → Email and press **Send test**.
+3. **Admin → Email → Google connection**: paste the JSON key, enter the mailbox to
+   send as, press **Connect Google**. No restart and no shell access needed — the
+   mailer is swapped in place.
+4. Set a **From address** and press **Send test**.
+
+The uploaded key is written to a file on a mounted volume (`email_secrets`), not
+to a database column. That is deliberate: `GET /api/admin/backup` hands an admin a
+full `pg_dump`, and a credential in a table would ride along in every copy of that
+file. It is never read back out to a browser — the panel only ever shows the
+service-account address.
+
+For an ops-managed deployment, `GOOGLE_SA_KEY_HOST_PATH` + `GOOGLE_IMPERSONATE` in
+`.env` still work and **take precedence**; the admin form then shows as read-only,
+so there is only ever one source of truth.
 
 The From address should be the impersonated mailbox, or one of its verified
 "send mail as" aliases — Gmail rejects or rewrites anything else.

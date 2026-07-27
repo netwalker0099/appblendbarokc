@@ -94,7 +94,7 @@ pub async fn run_worker(state: AppState) {
         // Queued customer email ("your blend is ready"). Sign-in links do not
         // come through here — they go out inline, because someone is waiting.
         if let Err(e) =
-            crate::email::dispatch::drain(&state.db, state.mailer.as_ref(), &site_url()).await
+            crate::email::dispatch::drain(&state.db, state.mailer().as_ref(), &site_url()).await
         {
             tracing::error!("email drain failed: {e}");
         }
