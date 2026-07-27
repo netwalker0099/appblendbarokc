@@ -82,6 +82,21 @@ async function removeMix(mix) {
   }
 }
 
+/** Mark a paid order ready to collect; the customer gets the "it's ready" email. */
+async function markReady(order) {
+  error.value = ''
+  notice.value = ''
+  try {
+    const res = await api.fulfilOrder(order.id)
+    notice.value = res.customer_emailed
+      ? 'Marked ready — the customer has been emailed.'
+      : 'Marked ready. No email was sent (check Admin → Email).'
+    await select(selected.value)
+  } catch (err) {
+    error.value = err.message
+  }
+}
+
 async function removeOrder(order) {
   error.value = ''
   notice.value = ''
@@ -335,6 +350,16 @@ function formatDate(value) {
             </span>
           </span>
           <span class="badge">{{ order.status }}</span>
+          <button
+            v-if="order.status === 'paid'"
+            class="ghost"
+            type="button"
+            style="flex: none"
+            title="Mark ready and email the customer"
+            @click="markReady(order)"
+          >
+            Mark ready
+          </button>
           <button
             v-if="isAdmin && order.status === 'lead'"
             class="icon"

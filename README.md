@@ -234,6 +234,84 @@ state directly; that button is also the recovery path for a webhook lost to a de
 - `GET /api/square/status` — backend, live-vs-mock, webhook state, cart counts.
 - `GET /api/square/events` — recent inbound webhooks, for debugging.
 
+## Email (Google Workspace SMTP relay)
+
+Two messages leave the app:
+
+| Message | When | Optional? |
+|---|---|---|
+| **Sign-in link** | A customer asks to enter the portal | **No** — it is the only way in |
+| **Your blend is ready** | Staff press "Mark ready" on a paid order | Yes, toggle in Admin → Email |
+
+Configured in **Admin → Email**: sender address, sender name, reply-to, the
+order-ready toggle, a test-send button, and a log of what was sent. Relay host and
+credentials are **not** settable there — they live in the server environment, like
+every other secret in this app.
+
+### Why the relay, and not the alternatives
+
+Google has spent several years closing the easy doors, so the choice is narrower
+than it looks:
+
+- **Basic SMTP username/password** — being disabled; not an option.
+- **App passwords** — still work, but Google's own docs call them "not
+  recommended". They cannot be scoped, and anyone holding the 16 characters has
+  full send rights on that mailbox.
+- **Gmail API + service account with domain-wide delegation** — supported, but it
+  means a private key on disk, token refresh, multi-party admin approval for the
+  delegation, and a CASA security assessment if restricted scopes are involved.
+- **`smtp-relay.gmail.com`** — Google's documented path for exactly this shape: an
+  application on a server sending as a Workspace domain. Authorised by **IP
+  allowlist**, which this deployment can satisfy because it is one VPS with a
+  fixed address — so there are **no credentials on the box at all**.
+
+The relay wins on this deployment. Everything goes through a `Mailer` trait, so
+swapping in the Gmail API later touches one file and no callers.
+
+### Setting it up
+
+1. Google Admin → **Apps → Google Workspace → Gmail → Routing → SMTP relay service**.
+2. Allowed senders: **Only addresses in my domains**.
+3. Authentication: tick **Only accept mail from the specified IP addresses** and
+   add this server's public IP.
+4. Encryption: tick **Require TLS encryption**.
+5. Set `SMTP_HOST=smtp-relay.gmail.com` and `SMTP_PORT=587` in `.env`, restart the
+   API, then set a **From address** in Admin → Email and press **Send test**.
+
+The From address must be a mailbox on the Workspace domain — the relay refuses to
+send as a domain it does not own. Check SPF/DKIM/DMARC are in place for the domain
+or messages will land in spam.
+
+If you additionally enable "Require SMTP Authentication", set `SMTP_USERNAME` and
+`SMTP_PASSWORD` together; the app refuses to start a half-configured login rather
+than falling back to an unauthenticated connection.
+
+### Design notes
+
+- **No message body is ever stored.** `email_deliveries` records metadata only. A
+  sign-in email contains a token that grants a customer session, and that token is
+  already held hashed in `customer_login_tokens` — persisting the rendered body
+  would leave a working credential at rest in a second place. Queued mail is
+  re-rendered from ids at send time.
+- **Sign-in links send inline; everything else queues.** Someone is watching a
+  "check your email" screen and the token expires in minutes, so that path does
+  not wait for a worker tick. Order-ready mail goes through the queue with
+  exponential backoff.
+- **The request-link endpoint answers identically whether or not the address
+  exists**, including when sending fails, so it cannot be used to discover who is
+  a customer.
+- **TLS is required, not preferred.** The transport refuses to fall back to an
+  unencrypted connection, which would put sign-in links on the wire in clear.
+- Every message is **plain text and HTML**. A sign-in link that only renders in an
+  HTML client fails for anyone whose mail app blocks HTML.
+- One "your blend is ready" per order, enforced by a partial unique index —
+  pressing the button twice does not email the customer twice.
+
+> **Until `SMTP_HOST` is set** the app uses a mock that writes messages to the
+> server log. Sign-in links therefore never arrive, and the customer portal is
+> effectively closed — which is why `PORTAL_BYPASS_EMAIL` still exists. Remove
+> that bypass once the relay is live.
+
 ## Chat notifications (Discord / Slack / Teams)
 
 Posts to a chat channel when **a customer** does something. Two events, and only

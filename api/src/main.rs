@@ -2,6 +2,7 @@ mod auth;
 mod billing;
 mod customer_auth;
 mod db;
+mod email;
 mod employee_auth;
 mod error;
 mod models;
@@ -18,6 +19,7 @@ use sqlx::PgPool;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use crate::email::Mailer;
 use crate::square::Square;
 
 #[derive(Clone)]
@@ -36,6 +38,9 @@ pub struct AppState {
     /// Guards the one unauthenticated endpoint that writes rows and calls Square
     /// (the share-page checkout).
     pub public_checkout_limiter: Arc<ratelimit::RateLimiter>,
+    /// Outbound email. Falls back to a mock that logs instead of sending when no
+    /// SMTP relay is configured.
+    pub mailer: Arc<dyn Mailer>,
 }
 
 #[tokio::main]
@@ -136,6 +141,7 @@ async fn main() {
             10,
             std::time::Duration::from_secs(300),
         )),
+        mailer: email::from_env(),
     };
 
     // Push contacts to Square Customers and expire abandoned checkouts, for the

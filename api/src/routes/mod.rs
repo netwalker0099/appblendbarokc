@@ -2,6 +2,7 @@ pub mod admin;
 pub mod bundles;
 pub mod carts;
 pub mod deletions;
+pub mod email_admin;
 pub mod customer_portal;
 pub mod customers;
 pub mod employees;
@@ -60,6 +61,15 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/customers/:id/delete", post(deletions::delete_customer))
         .route("/api/mixes/:id/delete", post(deletions::delete_mix))
         .route("/api/orders/:id/delete", post(deletions::delete_order))
+        .route("/api/orders/:id/fulfil", post(orders::fulfil))
+        // Outbound email. Relay credentials stay in the environment; only the
+        // sender identity and toggles are settable here.
+        .route(
+            "/api/email/settings",
+            get(email_admin::get).patch(email_admin::update),
+        )
+        .route("/api/email/test", post(email_admin::test))
+        .route("/api/email/recent", get(email_admin::recent))
         .route("/api/ingredients/:id/delete", post(deletions::delete_ingredient))
         .route("/api/scents/:id/delete", post(deletions::delete_scent))
         // Carts + Square checkout. Money only ever moves on Square's side; these

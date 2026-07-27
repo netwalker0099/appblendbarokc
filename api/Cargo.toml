@@ -25,3 +25,5 @@ base64 = "0.22"
 argon2 = "0.5"
 totp-rs = { version = "5", features = ["gen_secret", "otpauth", "qr"] }
 qrcode = "0.14"
+# Google Workspace SMTP relay. rustls to match the rest of the stack (no openssl).
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder", "hostname"] }

@@ -64,6 +64,41 @@ pub struct UpdateOrderRequest {
     pub amount: Option<Decimal>,
 }
 
+/// Mark an order ready to collect, and tell the customer.
+///
+/// This is the missing half of the online-order promise: the thank-you page says
+/// "we'll email you when it's ready", and until now nothing ever did. Queuing the
+/// mail is idempotent — a unique index means pressing this twice does not email
+/// the customer twice.
+pub async fn fulfil(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let status: Option<String> = sqlx::query_scalar("select status::text from orders where id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?;
+    let status = status.ok_or_else(|| AppError::NotFound("order not found".into()))?;
+
+    if status == "lead" {
+        return Err(AppError::Conflict(
+            "this order hasn't been paid for yet — take payment before marking it ready".into(),
+        ));
+    }
+
+    sqlx::query("update orders set status = 'fulfilled' where id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+
+    let emailed = crate::email::dispatch::queue_order_ready(&state.db, id).await?;
+
+    Ok(Json(serde_json::json!({
+        "status": "fulfilled",
+        "customer_emailed": emailed,
+    })))
+}
+
 pub async fn update(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,

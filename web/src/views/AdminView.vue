@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import BundleManager from '../components/BundleManager.vue'
 import CatalogManager from '../components/CatalogManager.vue'
+import EmailManager from '../components/EmailManager.vue'
 import NotificationManager from '../components/NotificationManager.vue'
 import ScentManager from '../components/ScentManager.vue'
 import TeamManager from '../components/TeamManager.vue'
@@ -29,6 +30,7 @@ const TABS = [
   { id: 'team', label: 'Team' },
   { id: 'billing', label: 'Billing' },
   { id: 'alerts', label: 'Notifications' },
+  { id: 'email', label: 'Email' },
   { id: 'data', label: 'Data' },
 ]
 
@@ -66,6 +68,12 @@ const tabAlert = computed(() => ({
   // contact syncs rot silently. Both are fixed from the Billing tab, so the dot
   // points at the tab that holds the control.
   billing: Boolean(square.value && !square.value.live) || failedCount.value > 0,
+  // No relay, or no From address, means sign-in links never arrive and the
+  // customer portal is effectively closed.
+  email:
+    Boolean(emailState.value && !emailState.value.live) ||
+    Boolean(emailState.value && !emailState.value.settings.from_address) ||
+    Boolean(emailState.value && emailState.value.counts.failed > 0),
 }))
 
 const ingredients = ref([])
@@ -76,6 +84,8 @@ const square = ref(null)
 const squareEvents = ref([])
 const notificationTargets = ref([])
 const bundles = ref([])
+const emailState = ref(null)
+const emailDeliveries = ref([])
 const report = ref(null)
 const reconciling = ref(false)
 // Default the reconciliation window to the last 7 days, as YYYY-MM-DD.
@@ -105,7 +115,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [ing, sc, emp, set, st, sq, ev, nt, bd] = await Promise.all([
+    const [ing, sc, emp, set, st, sq, ev, nt, bd, em, ed] = await Promise.all([
       api.listIngredients(),
       api.listScents(),
       api.listEmployees(),
@@ -115,9 +125,13 @@ async function load() {
       api.listSquareEvents(),
       api.listNotificationTargets(),
       api.listBundles(),
+      api.getEmailState(),
+      api.listEmailDeliveries(),
     ])
     notificationTargets.value = nt
     bundles.value = bd
+    emailState.value = em
+    emailDeliveries.value = ed
     ingredients.value = ing
     scents.value = sc
     employees.value = emp
@@ -137,6 +151,17 @@ async function load() {
 function handle(err) {
   error.value = err.message
   if (err.status === 401) router.push({ name: 'login' })
+}
+
+async function reloadEmail() {
+  try {
+    ;[emailState.value, emailDeliveries.value] = await Promise.all([
+      api.getEmailState(),
+      api.listEmailDeliveries(),
+    ])
+  } catch (err) {
+    handle(err)
+  }
 }
 
 async function reloadBundles() {
@@ -688,6 +713,15 @@ function formatTime(value) {
       v-show="activeTab === 'alerts'"
     >
       <NotificationManager :targets="notificationTargets" @changed="reloadNotifications" />
+    </section>
+
+    <section
+      id="panel-email"
+      role="tabpanel"
+      aria-labelledby="tab-email"
+      v-show="activeTab === 'email'"
+    >
+      <EmailManager :state="emailState" :deliveries="emailDeliveries" @changed="reloadEmail" />
     </section>
 
     <section

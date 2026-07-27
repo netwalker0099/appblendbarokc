@@ -34,6 +34,12 @@ services:
       SQUARE_WEBHOOK_URL: ${SQUARE_WEBHOOK_URL:-}
       # TEMPORARY dev bypass for the customer portal (remove when email is wired).
       PORTAL_BYPASS_EMAIL: ${PORTAL_BYPASS_EMAIL:-}
+      # Email via the Google Workspace SMTP relay. No SMTP_HOST => mock mailer.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      CUSTOMER_SITE_URL: ${CUSTOMER_SITE_URL:-https://sandbox.theblendbarokc.com}
       RUST_LOG: info
     expose:
       - "8080"

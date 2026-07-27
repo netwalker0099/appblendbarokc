@@ -37,6 +37,12 @@ const CHECKOUT_TTL_HOURS: i64 = 24;
 /// a tidy-up, not a hot path.
 const EXPIRY_EVERY: u32 = 120;
 
+/// Public site root, used to build links in customer email.
+fn site_url() -> String {
+    std::env::var("CUSTOMER_SITE_URL")
+        .unwrap_or_else(|_| "https://sandbox.theblendbarokc.com".to_string())
+}
+
 /// Transactionally enqueue a downstream sync. Safe to call repeatedly — a pending
 /// job for the same entity is reused (its retry clock reset to now) rather than
 /// duplicated, thanks to the partial unique index on `(entity_type, entity_id)`.
@@ -83,6 +89,14 @@ pub async fn run_worker(state: AppState) {
         // never on the payment path — a Discord outage must not fail a checkout.
         if let Err(e) = crate::notify::drain(&state.db, &http).await {
             tracing::error!("notification drain failed: {e}");
+        }
+
+        // Queued customer email ("your blend is ready"). Sign-in links do not
+        // come through here — they go out inline, because someone is waiting.
+        if let Err(e) =
+            crate::email::dispatch::drain(&state.db, state.mailer.as_ref(), &site_url()).await
+        {
+            tracing::error!("email drain failed: {e}");
         }
 
         if tick % EXPIRY_EVERY == 0 {

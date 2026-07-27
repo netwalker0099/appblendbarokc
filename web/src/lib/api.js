@@ -121,6 +121,16 @@ export const api = {
   testNotificationTarget: (id) =>
     request(`/notifications/targets/${id}/test`, { method: 'POST' }),
   listNotificationDeliveries: () => request('/notifications/recent'),
+
+  // --- email (admin) ---
+  // Relay host and credentials are server-side env only; these never carry them.
+  getEmailState: () => request('/email/settings'),
+  updateEmailSettings: (patch) => request('/email/settings', { method: 'PATCH', body: patch }),
+  sendTestEmail: (to) => request('/email/test', { method: 'POST', body: { to } }),
+  listEmailDeliveries: () => request('/email/recent'),
+
+  // Mark an order ready to collect; queues the customer's "it's ready" email.
+  fulfilOrder: (id) => request(`/orders/${id}/fulfil`, { method: 'POST' }),
   listCustomers: (email) =>
     request(email ? `/customers?email=${encodeURIComponent(email)}` : '/customers'),
   getCustomer: (id) => request(`/customers/${id}`),

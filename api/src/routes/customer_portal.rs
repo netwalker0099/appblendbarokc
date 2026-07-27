@@ -91,10 +91,24 @@ pub async fn request_link(
         .await?;
 
         let link = format!("{}/portal/verify?token={}", site_url(), token);
-        // EMAIL STUB: no mailer wired yet, so log the link. Replace this with a
-        // real send once email is configured — never return the token to the
-        // caller (that would defeat the email-ownership check).
-        tracing::info!(email = %email, "customer magic link: {link}");
+
+        // Sent inline, not queued: someone is watching a "check your email"
+        // screen and the token expires in minutes. A failure is logged and
+        // recorded, but never surfaced to the caller — the response is identical
+        // whether or not the address exists, so this endpoint cannot be used to
+        // discover who is a customer.
+        if let Err(e) = crate::email::dispatch::send_magic_link(
+            &state.db,
+            state.mailer.as_ref(),
+            customer.id,
+            &email,
+            &link,
+            ca::LOGIN_TTL_MINUTES,
+        )
+        .await
+        {
+            tracing::error!(email = %email, "could not send sign-in link: {e}");
+        }
     }
     Ok(Json(json!({ "status": "sent" })).into_response())
 }
