@@ -37,8 +37,13 @@ pub struct Cart {
     pub customer_id: Uuid,
     pub status: CartStatus,
     pub currency: String,
-    /// What we asked Square to charge.
+    /// What we asked Square to charge, i.e. lines minus `discount_cents`.
     pub total_cents: i64,
+    /// Taken off the line total by a referral or a coupon.
+    pub discount_cents: i64,
+    pub coupon_id: Option<Uuid>,
+    /// The referral code the buyer arrived with, if any.
+    pub referral_code: Option<String>,
     /// What Square reported collecting. `None` until a payment settles.
     pub paid_cents: Option<i64>,
     pub square_order_id: Option<String>,

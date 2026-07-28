@@ -117,6 +117,14 @@ pub async fn apply_payment(
             // run more than once for a single customer payment.
             crate::notify::enqueue_for_paid_cart(&mut *tx, &cart).await?;
 
+            // The sharer earns their coupon only now the money has actually
+            // arrived — issuing at checkout would mint rewards for baskets
+            // nobody ever paid for, and abandoning a basket is free.
+            if let Some(code) = &cart.referral_code {
+                crate::referrals::settle_referral(&mut *tx, cart.id, cart.customer_id, code)
+                    .await?;
+            }
+
             // Flag a short payment rather than silently accepting it. This is
             // the single most useful signal the integration produces: it means
             // the amount charged did not match the amount quoted.
@@ -247,6 +255,9 @@ pub async fn cancel_cart(
         .bind(cart_id)
         .execute(&mut *tx)
         .await?;
+
+    // Give the coupon back — it was held against a cart that never paid.
+    crate::referrals::release_coupon(&mut tx, cart_id).await?;
 
     // An order raised by the public share page exists only because someone
     // clicked Buy; if they never paid, nothing was ever made and the row is

@@ -165,7 +165,34 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Jso
     let customer = ca::load_customer(&state.db, &headers)
         .await
         .ok_or(AppError::Unauthorized)?;
-    Ok(Json(json!({ "email": customer.email, "name": customer.name })))
+
+    let cfg = crate::referrals::settings(&state.db).await?;
+    // Allocated on first view rather than at signup: most customers never share,
+    // and an unused code is a row that has to stay unique forever.
+    let referral_code = if cfg.enabled {
+        Some(crate::referrals::code_for(&state.db, customer.id).await?)
+    } else {
+        None
+    };
+
+    // Only spendable coupons. An expired or already-used one is noise.
+    let coupons = sqlx::query_as::<_, (String, i64, Option<chrono::DateTime<Utc>>)>(
+        "select code, amount_cents, expires_at from coupons          where customer_id = $1 and status = 'active'            and (expires_at is null or expires_at > now())          order by created_at",
+    )
+    .bind(customer.id)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(json!({
+        "email": customer.email,
+        "name": customer.name,
+        "referral_code": referral_code,
+        "referral_discount_cents": cfg.discount_cents,
+        "referral_reward_cents": cfg.reward_cents,
+        "coupons": coupons.iter().map(|(code, amount, expires)| json!({
+            "code": code, "amount_cents": amount, "expires_at": expires,
+        })).collect::<Vec<_>>(),
+    })))
 }
 
 pub async fn logout(

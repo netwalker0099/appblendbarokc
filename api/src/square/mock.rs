@@ -50,11 +50,14 @@ impl Square for MockSquare {
             return Err(SquareError::Config("cannot check out an empty cart".into()));
         }
 
-        let total: i64 = push
+        let gross: i64 = push
             .line_items
             .iter()
             .map(|li| li.unit_amount_cents * li.quantity as i64)
             .sum();
+        let discounted: i64 = push.discounts.iter().map(|d| d.amount_cents).sum();
+        // Mirrors the real thing: the customer is charged net of discounts.
+        let total = (gross - discounted).max(0);
 
         // Deterministic ids derived from the cart, so re-running a checkout is
         // stable and the ids are obviously fake in logs and the admin UI.
@@ -164,6 +167,7 @@ mod tests {
                 quantity: qty,
                 unit_amount_cents: cents,
             }],
+            discounts: Vec::new(),
             redirect_url: None,
             note: None,
         }

@@ -96,6 +96,36 @@ function isoDaysAgo(n) {
   d.setDate(d.getDate() - n)
   return d.toISOString().slice(0, 10)
 }
+const referral = reactive({
+  referral_enabled: false,
+  referral_discount_cents: 500,
+  referral_reward_cents: 500,
+  coupon_expiry_days: 365,
+})
+const savingReferral = ref(false)
+
+// Entered as dollars, stored as cents — the same rule as everywhere else money
+// crosses a boundary in this app.
+const dollars = (cents) => (Number(cents || 0) / 100).toFixed(2)
+const toCents = (v) => Math.round(Number(v || 0) * 100)
+
+async function saveReferral() {
+  savingReferral.value = true
+  try {
+    await api.updateSettings({
+      referral_enabled: referral.referral_enabled,
+      referral_discount_cents: toCents(referral.referral_discount_cents),
+      referral_reward_cents: toCents(referral.referral_reward_cents),
+      coupon_expiry_days: Number(referral.coupon_expiry_days) || 0,
+    })
+    flash('Saved referral settings.')
+  } catch (err) {
+    handle(err)
+  } finally {
+    savingReferral.value = false
+  }
+}
+
 const CUSTOM_PRICE_KEYS = [
   'custom_price_oz3_4',
   'custom_price_oz1_7',
@@ -141,6 +171,10 @@ async function load() {
     for (const k of CUSTOM_PRICE_KEYS) {
       customPrices[k] = set[k] ?? ''
     }
+    referral.referral_enabled = set.referral_enabled
+    referral.referral_discount_cents = dollars(set.referral_discount_cents)
+    referral.referral_reward_cents = dollars(set.referral_reward_cents)
+    referral.coupon_expiry_days = set.coupon_expiry_days
   } catch (err) {
     handle(err)
   } finally {
@@ -425,6 +459,51 @@ function formatTime(value) {
       </div>
       <button class="ghost" type="button" :disabled="savingPrices" style="margin-top: 0.8rem" @click="saveCustomPrices">
         {{ savingPrices ? 'Saving…' : 'Save custom-blend prices' }}
+      </button>
+    </div>
+
+    <div class="card">
+      <h2>Referrals</h2>
+      <p class="muted">
+        When a customer shares a scent from their portal, the link carries their
+        code. A friend who buys through it saves — and once that purchase is
+        <em>paid</em>, the sharer earns a coupon. Rewards are issued on payment,
+        not at checkout, so an abandoned basket never mints one.
+      </p>
+
+      <label class="checkbox" style="margin-bottom: 0.8rem">
+        <input type="checkbox" v-model="referral.referral_enabled" />
+        Referral discounts are running
+      </label>
+
+      <div class="row">
+        <div class="field grow">
+          <label>Buyer saves ($)</label>
+          <input v-model="referral.referral_discount_cents" type="number" min="0" step="0.01" />
+        </div>
+        <div class="field grow">
+          <label>Sharer earns ($)</label>
+          <input v-model="referral.referral_reward_cents" type="number" min="0" step="0.01" />
+        </div>
+        <div class="field grow">
+          <label>Coupon expires (days)</label>
+          <input v-model="referral.coupon_expiry_days" type="number" min="0" step="1" />
+        </div>
+      </div>
+      <p class="muted field-help">
+        0 days means coupons never expire. A coupon keeps the value it was issued
+        at, so changing these amounts never re-values one already in someone's
+        hands. A discount is capped at the order total — it can reduce a sale to
+        zero but never below.
+      </p>
+
+      <button
+        class="ghost"
+        type="button"
+        :disabled="savingReferral"
+        @click="saveReferral"
+      >
+        {{ savingReferral ? 'Saving…' : 'Save referral settings' }}
       </button>
     </div>
 

@@ -60,6 +60,14 @@ pub struct LineItemPush {
     pub unit_amount_cents: i64,
 }
 
+/// A fixed amount off the whole order. Square models this as an order-level
+/// discount rather than a negative line item, which it does not accept.
+#[derive(Debug, Clone)]
+pub struct DiscountPush {
+    pub name: String,
+    pub amount_cents: i64,
+}
+
 /// A cart being handed to Square to collect money for.
 #[derive(Debug)]
 pub struct CheckoutPush {
@@ -71,6 +79,9 @@ pub struct CheckoutPush {
     pub currency: String,
     pub buyer_email: Option<String>,
     pub line_items: Vec<LineItemPush>,
+    /// Order-level discounts (referral, coupon). Never enough to take the order
+    /// below zero — the caller clamps first.
+    pub discounts: Vec<DiscountPush>,
     /// Where Square sends the browser after a successful payment.
     pub redirect_url: Option<String>,
     pub note: Option<String>,

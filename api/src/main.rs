@@ -9,6 +9,7 @@ mod models;
 mod notify;
 mod pricing;
 mod ratelimit;
+mod referrals;
 mod routes;
 mod square;
 mod sync;

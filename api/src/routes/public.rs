@@ -78,11 +78,19 @@ pub struct PublicCheckoutRequest {
     pub size: BottleSize,
     pub email: String,
     pub name: Option<String>,
+    /// The referral code from the share link (`/s/<id>?ref=CODE`).
+    pub referral_code: Option<String>,
+    /// A coupon the buyer already holds.
+    pub coupon_code: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct PublicCheckoutResponse {
     pub checkout_url: String,
+    /// What came off, so the page can say so rather than leaving the customer to
+    /// discover it on Square's screen.
+    pub discount_cents: i64,
+    pub total_cents: i64,
 }
 
 /// Buy a shared scent. **No authentication** — anyone with the share link.
@@ -200,22 +208,58 @@ pub async fn checkout(
 
     let line_name = format!("{} ({})", scent.name, body.size.label());
 
+    // Work out the reduction now that we know who the buyer is — self-referral
+    // and already-rewarded pairs are both worth nothing.
+    let (referral_discount, _referrer) = crate::referrals::discount_for(
+        &state.db,
+        body.referral_code.as_deref(),
+        customer.id,
+    )
+    .await?;
+
+    // A coupon is personal: it only counts if it belongs to this buyer.
+    let coupon = match body.coupon_code.as_deref() {
+        Some(code) if !code.trim().is_empty() => {
+            crate::referrals::find_coupon(&state.db, code, Some(customer.id)).await?
+        }
+        _ => None,
+    };
+    let coupon_amount = coupon.as_ref().map(|c| c.amount_cents).unwrap_or(0);
+
+    // Clamped so the order can never go negative — Square rejects that, and a
+    // checkout that owes the customer money is not a reachable state.
+    let (total_cents, discount_cents) =
+        crate::referrals::apply_discount(cents, referral_discount + coupon_amount);
+
     let cart = sqlx::query_as::<_, Cart>(
         r#"
-        insert into carts (customer_id, currency, total_cents, idempotency_key, note)
-        values ($1, $2, $3, $4, $5)
+        insert into carts (customer_id, currency, total_cents, idempotency_key, note,
+                           discount_cents, coupon_id, referral_code)
+        values ($1, $2, $3, $4, $5, $6, $7, $8)
         returning *
         "#,
     )
     .bind(customer.id)
     .bind(DEFAULT_CURRENCY)
-    .bind(cents)
+    .bind(total_cents)
     .bind(Uuid::new_v4().to_string())
     // Staff need to know this one arrived from a share link and has to be made
     // up, rather than being handed over at the bar.
     .bind("Online order from a share link — to be crafted by staff")
+    .bind(discount_cents)
+    .bind(coupon.as_ref().map(|c| c.id))
+    .bind(body.referral_code.as_deref().map(|c| c.trim().to_uppercase()))
     .fetch_one(&mut *tx)
     .await?;
+
+    // Hold the coupon against this cart straight away. Conditional on it still
+    // being active, so two tabs cannot spend the same coupon twice; if it lost
+    // the race the cart simply proceeds without it rather than failing.
+    if let Some(c) = &coupon {
+        if !crate::referrals::redeem_coupon(&mut tx, c.id, cart.id).await? {
+            tracing::warn!(cart_id = %cart.id, "coupon was spent elsewhere first");
+        }
+    }
 
     sqlx::query(
         "insert into cart_items (cart_id, order_id, name, quantity, unit_amount_cents, kind) \
@@ -244,6 +288,14 @@ pub async fn checkout(
             quantity: 1,
             unit_amount_cents: cents,
         }],
+        discounts: if discount_cents > 0 {
+            vec![crate::square::DiscountPush {
+                name: if coupon.is_some() { "Coupon" } else { "Referral discount" }.to_string(),
+                amount_cents: discount_cents,
+            }]
+        } else {
+            Vec::new()
+        },
         redirect_url: Some(format!("{}/thanks", site_url())),
         note: cart.note.clone(),
     };
@@ -277,12 +329,15 @@ pub async fn checkout(
     tracing::info!(
         cart_id = %cart.id,
         scent = %scent.name,
-        total = %money::format_cents(cents, DEFAULT_CURRENCY),
+        total = %money::format_cents(total_cents, DEFAULT_CURRENCY),
+        discount = %money::format_cents(discount_cents, DEFAULT_CURRENCY),
         "public share checkout created"
     );
 
     Ok(Json(PublicCheckoutResponse {
         checkout_url: handle.url,
+        discount_cents,
+        total_cents,
     }))
 }
 

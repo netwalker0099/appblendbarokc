@@ -6,6 +6,8 @@
     String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
   const price = (p) => (p == null ? null : '$' + Number(p).toFixed(2).replace(/\.00$/, ''))
   const id = location.pathname.split('/').filter(Boolean).pop()
+  /* Who shared this. Carried through checkout so both sides get credited. */
+  const ref = new URLSearchParams(location.search).get('ref') || ''
 
   function notFound() {
     view.innerHTML = `<div class="share-card">
@@ -42,6 +44,7 @@
     view.innerHTML = `<div class="share-card">
       <img class="share-mark" src="/assets/img1.webp" alt="" />
       <p class="eyebrow">Shared with you</p>
+      ${ref ? '<p class="ref-note">A discount is applied at checkout.</p>' : ''}
       <h1>${esc(s.name)}</h1>
       ${notes ? `<p class="notes-label">Notes</p><div class="notes">${notes}</div>` : ''}
       ${sizeRows ? `<div class="sizes">${sizeRows}</div>` : ''}
@@ -104,6 +107,7 @@
             size,
             email,
             name: document.getElementById('name').value.trim() || null,
+            referral_code: ref || null,
           }),
         })
         const data = await res.json().catch(() => ({}))

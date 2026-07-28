@@ -10,8 +10,9 @@ use crate::error::AppError;
 use crate::models::settings::Settings;
 use crate::AppState;
 
-const COLS: &str =
-    "custom_price_oz3_4, custom_price_oz1_7, custom_price_roller, custom_price_spray";
+const COLS: &str = "custom_price_oz3_4, custom_price_oz1_7, custom_price_roller, \
+     custom_price_spray, referral_enabled, referral_discount_cents, \
+     referral_reward_cents, coupon_expiry_days";
 
 pub async fn get(
     _admin: AdminEmployee,
@@ -29,6 +30,11 @@ pub struct UpdateSettings {
     pub custom_price_oz1_7: Option<Decimal>,
     pub custom_price_roller: Option<Decimal>,
     pub custom_price_spray: Option<Decimal>,
+    pub referral_enabled: Option<bool>,
+    /// Cents, so the wire format matches how money is stored on carts.
+    pub referral_discount_cents: Option<i64>,
+    pub referral_reward_cents: Option<i64>,
+    pub coupon_expiry_days: Option<i32>,
 }
 
 pub async fn update(
@@ -50,15 +56,39 @@ pub async fn update(
         }
     }
 
+    for cents in [body.referral_discount_cents, body.referral_reward_cents]
+        .into_iter()
+        .flatten()
+    {
+        if cents < 0 {
+            return Err(AppError::BadRequest(
+                "referral amounts can't be negative".into(),
+            ));
+        }
+    }
+    if body.coupon_expiry_days.is_some_and(|d| d < 0) {
+        return Err(AppError::BadRequest(
+            "coupon expiry can't be negative — use 0 for never".into(),
+        ));
+    }
+
     let s = sqlx::query_as::<_, Settings>(&format!(
         "update settings set custom_price_oz3_4 = $1, custom_price_oz1_7 = $2, \
-         custom_price_roller = $3, custom_price_spray = $4 \
+         custom_price_roller = $3, custom_price_spray = $4, \
+         referral_enabled = coalesce($5, referral_enabled), \
+         referral_discount_cents = coalesce($6, referral_discount_cents), \
+         referral_reward_cents = coalesce($7, referral_reward_cents), \
+         coupon_expiry_days = coalesce($8, coupon_expiry_days) \
          where id = true returning {COLS}"
     ))
     .bind(body.custom_price_oz3_4)
     .bind(body.custom_price_oz1_7)
     .bind(body.custom_price_roller)
     .bind(body.custom_price_spray)
+    .bind(body.referral_enabled)
+    .bind(body.referral_discount_cents)
+    .bind(body.referral_reward_cents)
+    .bind(body.coupon_expiry_days)
     .fetch_one(&state.db)
     .await?;
     Ok(Json(s))

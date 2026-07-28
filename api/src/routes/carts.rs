@@ -29,6 +29,17 @@ use crate::square::money::{self, DEFAULT_CURRENCY};
 use crate::square::{CheckoutPush, LineItemPush};
 use crate::AppState;
 
+/// The cart's discount, as Square wants it. Empty when there is none.
+fn discount_push(cart: &Cart) -> Vec<crate::square::DiscountPush> {
+    if cart.discount_cents <= 0 {
+        return Vec::new();
+    }
+    vec![crate::square::DiscountPush {
+        name: if cart.coupon_id.is_some() { "Coupon" } else { "Referral discount" }.to_string(),
+        amount_cents: cart.discount_cents,
+    }]
+}
+
 /// Cap on lines per cart. Square accepts far more; this is a guard against a
 /// runaway client, not a business rule.
 const MAX_ITEMS: usize = 50;
@@ -335,11 +346,12 @@ pub async fn checkout(
     // charged, and "should never" is not a guarantee worth betting money on.
     // Charge the sum of what's actually on the cart, or refuse.
     let line_sum: i64 = items.iter().map(|i| i.line_total_cents()).sum();
-    if line_sum != cart.total_cents {
+    if line_sum - cart.discount_cents != cart.total_cents {
         tracing::error!(
             cart_id = %cart.id,
             stored = cart.total_cents,
             line_sum,
+            discount = cart.discount_cents,
             "cart total disagrees with its line items — refusing to check out"
         );
         return Err(AppError::Conflict(
@@ -365,6 +377,7 @@ pub async fn checkout(
                 unit_amount_cents: i.unit_amount_cents,
             })
             .collect(),
+        discounts: discount_push(&cart),
         redirect_url: None,
         note: cart.note.clone(),
     };

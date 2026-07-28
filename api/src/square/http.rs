@@ -203,6 +203,21 @@ impl Square for HttpSquare {
             order["note"] = json!(note);
         }
 
+        // Square has no negative line items; a reduction is an order-level
+        // discount with a FIXED_AMOUNT type.
+        if !push.discounts.is_empty() {
+            order["discounts"] = json!(push
+                .discounts
+                .iter()
+                .map(|d| json!({
+                    "name": d.name,
+                    "type": "FIXED_AMOUNT",
+                    "amount_money": { "amount": d.amount_cents, "currency": push.currency },
+                    "scope": "ORDER",
+                }))
+                .collect::<Vec<_>>());
+        }
+
         let mut body = json!({
             // Square dedups creates on this key for 24h, so a retried call after
             // a network timeout returns the original link rather than a second one.

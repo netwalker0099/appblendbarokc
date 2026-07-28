@@ -48,6 +48,17 @@ function newKey() {
 
 const activeScents = computed(() => scents.value.filter((s) => s.active))
 const activeBundles = computed(() => bundles.value.filter((b) => b.active))
+const selectedBundle = computed(() => bundles.value.find((b) => b.id === bundleId.value) || null)
+
+/** What a package contains, as staff need to read it off the screen. */
+function describeBundleItem(item) {
+  const what =
+    item.type === 'custom_mix'
+      ? 'Custom blend'
+      : scents.value.find((s) => s.id === item.scent_id)?.name || 'Scent'
+  const qty = item.quantity > 1 ? `${item.quantity} × ` : ''
+  return `${qty}${what}`
+}
 
 function ingredientName(id) {
   return ingredients.value.find((i) => i.id === id)?.name ?? 'Unknown'
@@ -330,6 +341,27 @@ function startAnother() {
           {{ b.name }} — ${{ b.price }}
         </button>
       </div>
+
+      <!-- Contents shown read-only once a package is chosen. The sizes are part
+           of the package definition, so they are deliberately not editable here:
+           changing one would mean the customer is no longer buying the package
+           that was priced. -->
+      <div v-if="selectedBundle" class="bundle-locked">
+        <p class="muted" style="margin: 0 0 0.5rem">
+          Included in <strong>{{ selectedBundle.name }}</strong> — sizes are fixed
+          by the package.
+        </p>
+        <div v-for="item in selectedBundle.items" :key="item.id" class="locked-row">
+          <span class="grow">{{ describeBundleItem(item) }}</span>
+          <span class="badge">{{ bottleLabel(item.size) }}</span>
+          <span class="lock" aria-label="fixed by the package" title="Fixed by the package">
+            &#128274;
+          </span>
+        </div>
+        <p class="muted" style="margin: 0.5rem 0 0; font-size: 0.85rem">
+          To sell a different size, add it as its own item below instead.
+        </p>
+      </div>
     </div>
 
     <div class="card" v-for="(line, i) in lines" :key="i">
@@ -448,3 +480,37 @@ function startAnother() {
     </p>
   </form>
 </template>
+
+<style scoped>
+.bundle-locked {
+  margin-top: 0.9rem;
+  padding: 0.8rem;
+  background: var(--surface-alt);
+  border-radius: var(--radius);
+}
+
+.locked-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.locked-row:last-of-type {
+  border-bottom: 0;
+}
+
+.locked-row .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Not a disabled control — there is no control. The package defines these, and
+   showing a greyed-out dropdown would imply it could be changed. */
+.lock {
+  flex: none;
+  opacity: 0.55;
+  font-size: 0.9rem;
+}
+</style>

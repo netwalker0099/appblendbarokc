@@ -70,10 +70,14 @@
       </div>`
   }
 
+  /* Set by the dashboard once /me is loaded; appended to share links so the
+     sharer gets credited when a friend buys. */
+  let referralCode = ''
+
   function blendCard(type, id, name) {
     const opts = SIZES.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')
     // Only house scents have public share pages (with prices); custom blends don't.
-    const shareUrl = location.origin + '/s/' + id
+    const shareUrl = location.origin + '/s/' + id + (referralCode ? '?ref=' + encodeURIComponent(referralCode) : '')
     const shareBtn = type === 'set_perfume' ? `<button class="btn ghost" data-share>Share</button>` : ''
     const panel =
       type === 'set_perfume'
@@ -98,6 +102,7 @@
   }
 
   async function dashboard(me) {
+    referralCode = me.referral_code || ''
     let data
     try {
       data = await api('/history')
@@ -116,6 +121,27 @@
         <button class="btn ghost" id="logoutBtn">Sign out</button>
       </div>
       <div id="flash"></div>
+      ${
+        referralCode
+          ? `<div class="portal-note">
+               <strong>Share and save.</strong> When a friend buys through your link
+               they get ${money(me.referral_discount_cents)} off, and you get a
+               ${money(me.referral_reward_cents)} coupon.
+             </div>`
+          : ''
+      }
+      ${
+        (me.coupons || []).length
+          ? `<h2 class="blend-h">Your coupons</h2><div class="blends">${me.coupons
+              .map(
+                (c) => `<div class="blend"><div class="blend-name">${money(c.amount_cents)} off</div>
+                  <div class="muted">Code <strong>${esc(c.code)}</strong>${
+                    c.expires_at ? ' · expires ' + new Date(c.expires_at).toLocaleDateString() : ''
+                  }</div></div>`,
+              )
+              .join('')}</div>`
+          : ''
+      }
       ${mixes.length ? `<h2 class="blend-h">Your custom blends</h2><div class="blends">${mixes.map((m) => blendCard('custom_mix', m.id, m.name || 'Custom blend')).join('')}</div>` : ''}
       ${scents.length ? `<h2 class="blend-h">Your signature scents</h2><div class="blends">${scents.map((s) => blendCard('set_perfume', s.id, s.name)).join('')}</div>` : ''}
       ${empty ? `<p class="muted">No saved blends yet — visit us at the bar to craft your first.</p>` : ''}`
@@ -159,6 +185,8 @@
       btn.textContent = 'Reorder'
     }
   }
+
+  const money = (cents) => '$' + (Number(cents || 0) / 100).toFixed(2).replace(/\.00$/, '')
 
   function flash(msg, bad) {
     const el = document.getElementById('flash')
