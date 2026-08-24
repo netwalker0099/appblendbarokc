@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import AuditLog from '../components/AuditLog.vue'
 import BackupScheduler from '../components/BackupScheduler.vue'
 import BundleManager from '../components/BundleManager.vue'
 import CatalogManager from '../components/CatalogManager.vue'
@@ -33,6 +34,7 @@ const TABS = [
   { id: 'alerts', label: 'Notifications' },
   { id: 'email', label: 'Email' },
   { id: 'data', label: 'Data' },
+  { id: 'activity', label: 'Activity' },
 ]
 
 const activeTab = ref(TABS.some((t) => t.id === route.query.tab) ? route.query.tab : TABS[0].id)
@@ -858,6 +860,18 @@ function formatTime(value) {
         {{ backingUp ? 'Preparing…' : 'Download database backup' }}
       </button>
     </div>
+    </section>
+
+    <section
+      id="panel-activity"
+      role="tabpanel"
+      aria-labelledby="tab-activity"
+      v-show="activeTab === 'activity'"
+    >
+      <!-- Loads its own data. It paginates, filters and can be re-queried
+           independently, so threading it through the view's single load() would
+           only couple the two. -->
+      <AuditLog />
     </section>
   </template>
 </template>

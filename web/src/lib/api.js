@@ -150,6 +150,18 @@ export const api = {
   runBackupNow: (id) => request(`/admin/backup/destinations/${id}/run`, { method: 'POST' }),
   listBackupRuns: () => request('/admin/backup/runs'),
 
+  // --- audit log (admin, read-only) ---
+  // There is no write/edit/delete counterpart on purpose: the log is append-only
+  // and the database enforces it.
+  listAuditLog: (params = {}) => {
+    const q = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== '' && v != null && v !== false),
+    )
+    return request(`/admin/audit${q.toString() ? `?${q}` : ''}`)
+  },
+  // Recomputes the hash chain server-side and reports any break.
+  verifyAuditChain: () => request('/admin/audit/verify'),
+
   // Mark an order ready to collect; queues the customer's "it's ready" email.
   fulfilOrder: (id) => request(`/orders/${id}/fulfil`, { method: 'POST' }),
   listCustomers: (email) =>

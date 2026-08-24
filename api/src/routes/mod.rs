@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod audit_log;
 pub mod backup_admin;
 pub mod bundles;
 pub mod carts;
@@ -123,11 +124,27 @@ pub fn build_router(state: AppState) -> Router {
             post(backup_admin::run_now),
         )
         .route("/api/admin/backup/runs", get(backup_admin::runs))
+        // Read-only views onto the audit log. There is deliberately no handler
+        // that writes or deletes one — the database refuses those anyway.
+        .route("/api/admin/audit", get(audit_log::list))
+        .route("/api/admin/audit/verify", get(audit_log::verify))
         .route("/api/settings", get(settings::get).patch(settings::update))
         .route("/api/employees", get(employees::list).post(employees::create))
         .route("/api/employees/:id", patch(employees::update))
         .route("/api/employees/:id/reset-password", post(employees::reset_password))
         .route("/api/employees/:id/reset-mfa", post(employees::reset_mfa))
+        // Order matters. Layers are applied inside-out, so this reads bottom-up:
+        // `require_employee` runs first and injects the actor, then `audit`
+        // records the action. Audit has to be *inside* auth — outside it, there
+        // would be nobody to attribute the entry to.
+        //
+        // Audit sits on the whole authenticated router rather than on individual
+        // handlers so a route added later is covered automatically. The failure
+        // mode of an audit log is the entry nobody wrote.
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::audit::record,
+        ))
         // Every operator route requires a full (MFA-complete) employee session;
         // admin-only routes additionally use the `AdminEmployee` extractor.
         .route_layer(middleware::from_fn_with_state(

@@ -805,6 +805,55 @@ the alternative, not taken because customer access is likely later — see below
   `/admin`** (no roles). Add an admin role + token revocation before scaling
   devices — and definitely before the customer-facing plan below.
 
+- **Audit log (2026-08-24)**: append-only, tamper-evident record of staff
+  actions. Migration `0019_admin_audit_log.sql`, middleware in
+  `api/src/audit.rs`, read routes in `api/src/routes/audit_log.rs`, UI in
+  `web/src/components/AuditLog.vue` (Admin → **Activity**, an 8th tab).
+
+  - **Middleware, not per-handler calls.** An audit log's only real failure mode
+    is the entry nobody wrote, and a `record(...)` line at the top of each
+    handler works until someone adds a route and forgets — nothing breaks and no
+    test fails. The layer sits on the whole authenticated router, *inside*
+    `require_employee` (so the actor is known) and outside the handlers. New
+    routes are covered the moment they exist.
+  - **Scope**: every state-changing request (POST/PUT/PATCH/DELETE) from a
+    signed-in employee, plus an explicit list of sensitive reads —
+    `GET /api/admin/backup`, which exports every customer record and otherwise
+    leaves no trace anywhere. Ordinary GETs are skipped on purpose: thousands of
+    them would bury the dozen entries a month that matter. The UI defaults to
+    `role=admin` so worker intake does not drown the admin actions.
+  - **Three layers of immutability**, because the app connects as the `blendbar`
+    owner and no grant makes a table untouchable for an owner. (1) Triggers
+    refuse UPDATE, DELETE and TRUNCATE. (2) A SHA-256 hash chain — each row
+    stores its predecessor's hash, and its own hash covers that link plus its
+    contents. (3) **The chain is computed by a Postgres BEFORE INSERT trigger,
+    not by Rust**, so a row inserted by hand in psql is chained identically; if
+    the app did it, anyone with a DB connection could append an unchained row.
+  - `verify_admin_audit_chain()` recomputes the chain and reports the first
+    break; surfaced as a **Verify** button, because tamper-evidence is worth
+    nothing unless somebody checks. Writer and verifier share one hash function
+    (`admin_audit_entry_hash`) so they cannot drift and raise false alarms.
+  - **Honest limit**: this is tamper-*evident*, not tamper-*proof*. Someone with
+    full DB access can drop the triggers and recompute the entire chain from
+    their edit onwards. Defeating that needs the head hash anchored off this box
+    — the verify endpoint returns the current head so it can be recorded
+    externally, which is the low-tech version.
+  - **Secrets are redacted before storage** (`audit::redact`, denylist on key
+    names, recursive through nested objects and arrays). A password or backup
+    passphrase written into an append-only table could never be removed, which
+    would make the log the richest target in the system. Body capture is capped
+    at 64KB.
+  - **An audit write failure never fails the request** — it logs loudly instead.
+    An audit insert that can take down intake is an audit log that gets removed.
+  - **Verified 2026-08-24**: 113 unit tests (7 new). Against a copy of the live
+    schema: chain links correctly, `verify` clean on an intact log, UPDATE /
+    DELETE / TRUNCATE all refused; then, with the triggers deliberately dropped,
+    an edited row was caught ("contents do not match the stored hash") and a
+    deleted row was caught via the broken link on its successor.
+  - **Not addressed**: retention. The table only grows, and nothing prunes it
+    (pruning an append-only log is a contradiction that needs a deliberate
+    answer — probably archiving a signed segment off-box, not deleting).
+
 **Future intent:** the owner may open this to **customers for online scent
 reordering**. That's a major security shift — it means real customer login/auth,
 a public untrusted surface, per-customer authorization (a customer may only see
