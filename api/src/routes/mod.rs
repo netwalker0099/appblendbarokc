@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod backup_admin;
 pub mod bundles;
 pub mod carts;
 pub mod deletions;
@@ -104,6 +105,24 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/sync/status", get(sync::status))
         .route("/api/sync/retry", post(sync::retry))
         .route("/api/admin/backup", get(admin::backup))
+        // Scheduled backups. Admin-only throughout (the `AdminEmployee`
+        // extractor on each handler): these configure and can trigger a full
+        // export of every customer record.
+        .route("/api/admin/backup/status", get(backup_admin::status))
+        .route("/api/admin/backup/passphrase", post(backup_admin::set_passphrase))
+        .route(
+            "/api/admin/backup/destinations",
+            get(backup_admin::list).post(backup_admin::create),
+        )
+        .route(
+            "/api/admin/backup/destinations/:id",
+            patch(backup_admin::update).delete(backup_admin::delete),
+        )
+        .route(
+            "/api/admin/backup/destinations/:id/run",
+            post(backup_admin::run_now),
+        )
+        .route("/api/admin/backup/runs", get(backup_admin::runs))
         .route("/api/settings", get(settings::get).patch(settings::update))
         .route("/api/employees", get(employees::list).post(employees::create))
         .route("/api/employees/:id", patch(employees::update))

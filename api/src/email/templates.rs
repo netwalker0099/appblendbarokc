@@ -141,9 +141,87 @@ pub fn test_message(site: &str) -> Rendered {
     }
 }
 
+/// Covering note for a scheduled backup, sent with the encrypted dump attached.
+///
+/// The restore command is in the body on purpose. The moment this email matters
+/// is the moment the server it documents is gone, so the instructions have to
+/// travel with the file — not sit in a README on the box that burned down.
+pub fn backup_ready(filename: &str, bytes: usize, plain_bytes: usize) -> Rendered {
+    let size = format_bytes(bytes);
+    let plain = format_bytes(plain_bytes);
+    let restore = format!("age -d {filename} | gunzip | psql \"$DATABASE_URL\"");
+
+    let text = format!(
+        "Attached is an encrypted backup of The Blend Bar database.\n\n\
+         File: {filename}\n\
+         Size: {size} encrypted ({plain} before compression)\n\n\
+         To restore it you need the backup passphrase and the `age` tool \
+         (https://age-encryption.org):\n\n\
+         {restore}\n\n\
+         Keep this message. Anyone holding both the attachment and the passphrase \
+         holds every customer record in the business, so do not forward it, and do \
+         not store the passphrase alongside it."
+    );
+
+    let html = wrap(
+        "Database backup",
+        &format!(
+            r#"<p style="margin:0 0 12px;font-size:15px;line-height:1.6;">Attached is an encrypted backup of The Blend Bar database.</p>
+    <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#897a63;"><strong style="color:#4c4235;">{}</strong><br>{} encrypted ({} before compression)</p>
+    <p style="margin:0 0 8px;font-size:14px;line-height:1.6;">To restore it you need the backup passphrase and <a href="https://age-encryption.org" style="color:#8c6a36;">age</a>:</p>
+    <pre style="margin:0 0 16px;padding:12px;background:#f6f1e7;border:1px solid #e2d7c1;border-radius:2px;font-size:12px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;">{}</pre>
+    <p style="margin:0;font-size:13px;line-height:1.6;color:#897a63;">Keep this message. Anyone holding both the attachment and the passphrase holds every customer record in the business &mdash; don&rsquo;t forward it, and don&rsquo;t store the passphrase alongside it.</p>"#,
+            esc(filename),
+            esc(&size),
+            esc(&plain),
+            esc(&restore),
+        ),
+    );
+
+    Rendered {
+        subject: format!("The Blend Bar — database backup {filename}"),
+        text,
+        html,
+    }
+}
+
+fn format_bytes(n: usize) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    let n = n as f64;
+    if n >= MB {
+        format!("{:.1} MB", n / MB)
+    } else if n >= KB {
+        format!("{:.1} KB", n / KB)
+    } else {
+        format!("{n:.0} bytes")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_backup_note_carries_the_restore_command_in_both_parts() {
+        // This email gets read on the day the server is gone. If the
+        // instructions are not in it, they are not anywhere.
+        let r = backup_ready("blendbar-backup-20260824-020000.sql.gz.age", 48_000, 512_000);
+        for body in [&r.text, &r.html] {
+            assert!(body.contains("age -d"), "no restore command");
+            assert!(body.contains("psql"), "no psql step");
+            assert!(body.contains("blendbar-backup-20260824-020000.sql.gz.age"));
+        }
+        assert!(r.text.contains("46.9 KB"));
+        assert!(r.text.contains("500.0 KB"));
+    }
+
+    #[test]
+    fn sizes_are_human_readable() {
+        assert_eq!(format_bytes(512), "512 bytes");
+        assert_eq!(format_bytes(2048), "2.0 KB");
+        assert_eq!(format_bytes(5 * 1024 * 1024), "5.0 MB");
+    }
 
     #[test]
     fn magic_link_carries_the_link_in_both_parts() {

@@ -1,7 +1,6 @@
 use axum::body::Body;
 use axum::http::header;
 use axum::response::Response;
-use tokio::process::Command;
 
 use crate::employee_auth::AdminEmployee;
 use crate::error::AppError;
@@ -14,27 +13,17 @@ use crate::error::AppError;
 /// dump includes `_sqlx_migrations`, so the app treats the schema as already
 /// migrated on first boot against the restored DB.
 ///
-/// Behind operator auth. NOTE: this is a full export of ALL customer PII and the
-/// (hashed) device tokens — the download is as sensitive as the database itself.
-/// No request input reaches the command, so there's no injection surface.
+/// This is the *manual pull*: unencrypted, straight to the browser, for taking a
+/// snapshot before a risky change. The scheduled equivalent in `crate::backup`
+/// encrypts and sends the same dump somewhere off this box; both call the same
+/// `pg_dump` so the two can never drift into producing different output — the
+/// restore instructions have to stay true for both.
+///
+/// Behind admin auth. NOTE: this is a full export of ALL customer PII — the
+/// download is as sensitive as the database itself. No request input reaches the
+/// command, so there is no injection surface.
 pub async fn backup(_admin: AdminEmployee) -> Result<Response, AppError> {
-    let database_url = std::env::var("DATABASE_URL")
-        .map_err(|_| AppError::Internal("DATABASE_URL not set".into()))?;
-
-    let output = Command::new("pg_dump")
-        .args(["--no-owner", "--no-privileges"])
-        .arg(&database_url)
-        .output()
-        .await
-        .map_err(|e| AppError::Internal(format!("could not run pg_dump: {e}")))?;
-
-    if !output.status.success() {
-        tracing::error!(
-            "pg_dump failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return Err(AppError::Internal("backup failed".into()));
-    }
+    let dump = crate::backup::pg_dump().await?;
 
     let filename = format!(
         "blendbar-backup-{}.sql",
@@ -47,6 +36,6 @@ pub async fn backup(_admin: AdminEmployee) -> Result<Response, AppError> {
             header::CONTENT_DISPOSITION,
             format!("attachment; filename=\"{filename}\""),
         )
-        .body(Body::from(output.stdout))
+        .body(Body::from(dump))
         .map_err(|e| AppError::Internal(e.to_string()))
 }

@@ -732,6 +732,62 @@ hashed. Errors don't leak internals. No Squarespace secrets reach the browser.
   with matching row counts. ⚠️ It's a full PII export gated only by device auth —
   reinforces the admin-RBAC need below.
 
+- **Scheduled backups (2026-08-24)**: encrypted, off-box, on a cron schedule.
+  Migration `0018_backup_schedules.sql` (`backup_destinations` + `backup_runs`);
+  code in `api/src/backup/` (`mod.rs` pipeline + worker, `schedule.rs` cron,
+  `destination.rs` trait + email backend, `drive.rs` Google Drive); routes in
+  `api/src/routes/backup_admin.rs`; UI in `web/src/components/BackupScheduler.vue`
+  (Admin → Data). Worker spawned in `main.rs` beside `sync::run_worker`, polling
+  every 60s.
+
+  - **Pipeline**: `pg_dump | gzip | age(passphrase)`. Compression *before*
+    encryption — ciphertext does not compress. 66KB dump → 14KB artefact in
+    practice. The manual download endpoint now shares the same `pg_dump` so the
+    two cannot drift.
+  - **Format is stock `age`** (`age-encryption.org/v1`), deliberately: restore is
+    `age -d f.sql.gz.age | gunzip | psql "$DATABASE_URL"` and does **not** need
+    this application. That is the whole point — the scenario you need a backup in
+    is the one where the app is gone.
+  - **Passphrase lives on the secrets volume** (`/var/lib/blendbar/secrets/backup-passphrase`,
+    0600), or `BACKUP_PASSPHRASE` in the env, **never in Postgres** — a passphrase
+    in a table would be dumped into every backup it encrypts, so every file would
+    carry its own key. Write-only from the browser. Verified absent from a real
+    `pg_dump`.
+  - **Schedules** are standard 5-field cron + an IANA timezone, resolved per run
+    so "daily at 3:30am" survives DST. Six-field expressions are *rejected*: the
+    crate accepts them and `0 2 * * *` would silently mean "every second of
+    02:00". UI presets cover hourly / every N hours / daily / weekly / custom.
+    Known gap, tested and documented: a job scheduled in the hour DST skips
+    (2am on the spring-forward day) does not run that day — which is why the
+    daily preset defaults to 3:30am.
+  - **Retention** deletes only files this scheduler uploaded and still has a
+    Drive file id for, so a shared folder cannot lose someone else's document.
+    Email has no delete, so retention does not apply there (said so in the UI).
+  - **Drive** uses `drive.file` scope via domain-wide delegation, impersonating a
+    real Workspace user — a service account has no Drive quota of its own and
+    uploading as one fails with `storageQuotaExceeded`. It needs a **second**
+    delegation entry alongside `gmail.send`; that is the step people miss, and
+    the 403 message says so.
+  - **Verified 2026-08-24**: 106 unit tests (26 new). End-to-end on this box —
+    migration applied, worker started, every validation rejection confirmed over
+    HTTP (4-field cron, 6-field cron, no recipient, sharepoint, 30 February,
+    retention 0), next-run times correct across three timezones, failures
+    recorded in `backup_runs` rather than swallowed, unauth → 401. **Restore
+    proven**: a real artefact built by the live pipeline was decrypted with the
+    stock `age` CLI 1.2.1, gunzipped to a byte-exact 66,732-byte dump, and
+    reloaded into a scratch database — 31 tables, 104 rows, *identical* counts.
+    All test artefacts (scratch DB, plaintext dump, test destinations, test
+    passphrase, temp session) were destroyed afterwards.
+  - ⚠️ **Not yet live**: no passphrase is set and no destination can deliver
+    (`GOOGLE_SA_KEY_FILE`, `GOOGLE_IMPERSONATE`, `SMTP_HOST` are all empty). The
+    email backend deliberately **refuses** rather than succeeding against the mock
+    mailer — a green history with nothing sent anywhere is the worst outcome for a
+    backup system.
+  - **SharePoint** is accepted by the schema's check constraint and refused by the
+    code with a clear message; there is no Microsoft tenant behind this
+    deployment. Adding it later is a new file behind `backup::destination::Backend`,
+    not a migration.
+
 **Chosen direction:** put **Cloudflare** in front (WAF + rate limiting + DDoS +
 hide origin IP) — not yet configured; it's the planned network layer. (VPN-only was
 the alternative, not taken because customer access is likely later — see below.)
@@ -739,10 +795,11 @@ the alternative, not taken because customer access is likely later — see below
 **Still open / recommended, not yet done:**
 - Rate limiting (none today) — comes with Cloudflare, or `caddy-ratelimit`+fail2ban.
 - SSH hardening (key-only, fail2ban, restrict :22), host `ufw` default-deny.
-- **Automated, scheduled, encrypted, off-box** DB backups + retention. The admin
-  button is a *manual pull* — good for ad-hoc/pre-change snapshots, but not a
-  substitute for an automated off-box routine (cron `pg_dump | age` → object
-  storage, tested restore).
+- ~~**Automated, scheduled, encrypted, off-box** DB backups + retention.~~ **BUILT
+  2026-08-24** — see "Scheduled backups" below. ⚠️ Restore-verified, but **nothing
+  is scheduled yet**: it needs a passphrase set in Admin → Data and a destination
+  that can actually deliver (neither Google nor SMTP is configured on this box).
+  Until both are done the only real backup is still the manual pull.
 - Least-privilege DB role for the app (currently connects as the `blendbar` owner).
 - Auth model: tokens never expire/rotate, and **any paired device can reach
   `/admin`** (no roles). Add an admin role + token revocation before scaling

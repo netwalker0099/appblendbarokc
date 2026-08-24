@@ -122,6 +122,7 @@ pub async fn send_magic_link(
             from_name: sender.from_name,
             reply_to: sender.reply_to,
             body,
+            attachments: Vec::new(),
         })
         .await;
 
@@ -206,6 +207,7 @@ pub async fn send_test(
             from_name: sender.from_name,
             reply_to: sender.reply_to,
             body,
+            attachments: Vec::new(),
         })
         .await;
 
@@ -294,6 +296,7 @@ async fn deliver(
             from_name: sender.from_name,
             reply_to: sender.reply_to,
             body,
+            attachments: Vec::new(),
         })
         .await
 }

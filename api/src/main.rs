@@ -1,10 +1,12 @@
 mod auth;
+mod backup;
 mod billing;
 mod customer_auth;
 mod db;
 mod email;
 mod employee_auth;
 mod error;
+mod google;
 mod models;
 mod notify;
 mod pricing;
@@ -161,6 +163,7 @@ async fn main() {
     // Push contacts to Square Customers and expire abandoned checkouts, for the
     // life of the process.
     tokio::spawn(sync::run_worker(state.clone()));
+    tokio::spawn(backup::run_worker(state.clone()));
 
     let app = routes::build_router(state);
 

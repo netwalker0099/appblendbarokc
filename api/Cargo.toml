@@ -29,3 +29,17 @@ qrcode = "0.14"
 # RS256 JWT signing for the Gmail service-account assertion (ring, not openssl).
 jsonwebtoken = "9"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder", "hostname"] }
+# Scheduled backups. `age` does the encryption: a real, audited format rather
+# than something hand-rolled, and — the deciding factor — one the standard `age`
+# CLI can decrypt. A backup restorable only by running this application is not a
+# backup, because the situation you need it in is the one where this application
+# is gone.
+age = "0.12"
+secrecy = "0.10"
+flate2 = "1"
+# 5-field cron as typed in the UI, parsed as 6-field with an explicit leading
+# "0" so a schedule can never silently mean "every second of the matching minute".
+cron = "0.17"
+# "Daily at 2am" has to survive a DST change, which means storing the zone and
+# resolving it per run rather than baking a UTC offset in at save time.
+chrono-tz = "0.10"

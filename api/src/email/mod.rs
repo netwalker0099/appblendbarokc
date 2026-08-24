@@ -32,7 +32,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use lettre::message::{header::ContentType, MultiPart, SinglePart};
+use lettre::message::{header::ContentType, Attachment, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
@@ -46,6 +46,82 @@ pub struct Outgoing {
     pub from_name: String,
     pub reply_to: Option<String>,
     pub body: Rendered,
+    /// Usually empty. Scheduled backups are the only sender that attaches
+    /// anything, and what they attach is an encrypted database dump.
+    pub attachments: Vec<Attached>,
+}
+
+/// A file to hang off a message.
+pub struct Attached {
+    pub filename: String,
+    pub bytes: Vec<u8>,
+    pub content_type: String,
+}
+
+/// Build the MIME message that both transports send.
+///
+/// Shared rather than written twice: the SMTP relay and the Gmail API held
+/// identical copies of this, which is how a change lands in one path and not the
+/// other — and "attachments work over SMTP but not over Gmail" is exactly the
+/// class of bug nobody notices until the backup they need arrives empty.
+///
+/// A message with nothing attached is `multipart/alternative`, byte-for-byte as
+/// before. With attachments it becomes `multipart/mixed` wrapping that
+/// alternative group: some clients will not display an attachment that is a
+/// sibling of the text parts rather than of the group.
+pub fn build_mime(message: &Outgoing) -> Result<Message, MailError> {
+    let from = format!("{} <{}>", message.from_name, message.from_address)
+        .parse()
+        .map_err(|e| MailError::NotConfigured(format!("bad from address: {e}")))?;
+    let to = message
+        .to
+        .parse()
+        .map_err(|e| MailError::Rejected(format!("bad recipient '{}': {e}", message.to)))?;
+
+    let mut builder = Message::builder()
+        .from(from)
+        .to(to)
+        .subject(message.body.subject.clone());
+
+    if let Some(reply_to) = &message.reply_to {
+        if let Ok(parsed) = reply_to.parse() {
+            builder = builder.reply_to(parsed);
+        }
+    }
+
+    // Text first, then HTML. Order matters — clients display the last part they
+    // can render.
+    let alternative = MultiPart::alternative()
+        .singlepart(
+            SinglePart::builder()
+                .header(ContentType::TEXT_PLAIN)
+                .body(message.body.text.clone()),
+        )
+        .singlepart(
+            SinglePart::builder()
+                .header(ContentType::TEXT_HTML)
+                .body(message.body.html.clone()),
+        );
+
+    if message.attachments.is_empty() {
+        return builder
+            .multipart(alternative)
+            .map_err(|e| MailError::Rejected(format!("could not build message: {e}")));
+    }
+
+    let mut mixed = MultiPart::mixed().multipart(alternative);
+    for file in &message.attachments {
+        let content_type = ContentType::parse(&file.content_type).map_err(|e| {
+            MailError::Rejected(format!("bad content type '{}': {e}", file.content_type))
+        })?;
+        mixed = mixed.singlepart(
+            Attachment::new(file.filename.clone()).body(file.bytes.clone(), content_type),
+        );
+    }
+
+    builder
+        .multipart(mixed)
+        .map_err(|e| MailError::Rejected(format!("could not build message: {e}")))
 }
 
 #[derive(Debug)]
@@ -133,42 +209,7 @@ impl Mailer for SmtpMailer {
     }
 
     async fn send(&self, message: Outgoing) -> Result<(), MailError> {
-        let from = format!("{} <{}>", message.from_name, message.from_address)
-            .parse()
-            .map_err(|e| MailError::NotConfigured(format!("bad from address: {e}")))?;
-        let to = message
-            .to
-            .parse()
-            .map_err(|e| MailError::Rejected(format!("bad recipient '{}': {e}", message.to)))?;
-
-        let mut builder = Message::builder()
-            .from(from)
-            .to(to)
-            .subject(message.body.subject.clone());
-
-        if let Some(reply_to) = &message.reply_to {
-            if let Ok(parsed) = reply_to.parse() {
-                builder = builder.reply_to(parsed);
-            }
-        }
-
-        // multipart/alternative: text first, then HTML. Order matters — clients
-        // display the last part they can render.
-        let email = builder
-            .multipart(
-                MultiPart::alternative()
-                    .singlepart(
-                        SinglePart::builder()
-                            .header(ContentType::TEXT_PLAIN)
-                            .body(message.body.text.clone()),
-                    )
-                    .singlepart(
-                        SinglePart::builder()
-                            .header(ContentType::TEXT_HTML)
-                            .body(message.body.html.clone()),
-                    ),
-            )
-            .map_err(|e| MailError::Rejected(format!("could not build message: {e}")))?;
+        let email = build_mime(&message)?;
 
         self.transport.send(email).await.map_err(|e| {
             let text = e.to_string();
@@ -343,6 +384,7 @@ mod tests {
                 from_name: "The Blend Bar".into(),
                 reply_to: None,
                 body: templates::test_message("https://x.test"),
+                attachments: Vec::new(),
             })
             .await;
         assert!(r.is_ok());

@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import BackupScheduler from '../components/BackupScheduler.vue'
 import BundleManager from '../components/BundleManager.vue'
 import CatalogManager from '../components/CatalogManager.vue'
 import EmailManager from '../components/EmailManager.vue'
@@ -74,6 +75,13 @@ const tabAlert = computed(() => ({
     Boolean(emailState.value && !emailState.value.live) ||
     Boolean(emailState.value && !emailState.value.settings.from_address) ||
     Boolean(emailState.value && emailState.value.counts.failed > 0),
+  // "No off-box backup exists" is the quietest serious problem in the whole
+  // system — nothing breaks until the day everything has already been lost —
+  // so it gets the same dot as a dead payment terminal.
+  data:
+    Boolean(backupStatus.value && !backupStatus.value.passphrase_set) ||
+    Boolean(backupStatus.value && !backupStatus.value.last_success_at) ||
+    backupDestinations.value.some((d) => d.enabled && d.last_status === 'failed'),
 }))
 
 const ingredients = ref([])
@@ -86,6 +94,9 @@ const notificationTargets = ref([])
 const bundles = ref([])
 const emailState = ref(null)
 const emailDeliveries = ref([])
+const backupStatus = ref(null)
+const backupDestinations = ref([])
+const backupRuns = ref([])
 const report = ref(null)
 const reconciling = ref(false)
 // Default the reconciliation window to the last 7 days, as YYYY-MM-DD.
@@ -145,7 +156,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [ing, sc, emp, set, st, sq, ev, nt, bd, em, ed] = await Promise.all([
+    const [ing, sc, emp, set, st, sq, ev, nt, bd, em, ed, bs, bdest, bruns] = await Promise.all([
       api.listIngredients(),
       api.listScents(),
       api.listEmployees(),
@@ -157,7 +168,13 @@ async function load() {
       api.listBundles(),
       api.getEmailState(),
       api.listEmailDeliveries(),
+      api.getBackupStatus(),
+      api.listBackupDestinations(),
+      api.listBackupRuns(),
     ])
+    backupStatus.value = bs
+    backupDestinations.value = bdest
+    backupRuns.value = bruns
     notificationTargets.value = nt
     bundles.value = bd
     emailState.value = em
@@ -185,6 +202,18 @@ async function load() {
 function handle(err) {
   error.value = err.message
   if (err.status === 401) router.push({ name: 'login' })
+}
+
+async function reloadBackups() {
+  try {
+    ;[backupStatus.value, backupDestinations.value, backupRuns.value] = await Promise.all([
+      api.getBackupStatus(),
+      api.listBackupDestinations(),
+      api.listBackupRuns(),
+    ])
+  } catch (err) {
+    handle(err)
+  }
 }
 
 async function reloadEmail() {
@@ -809,12 +838,21 @@ function formatTime(value) {
       aria-labelledby="tab-data"
       v-show="activeTab === 'data'"
     >
+    <BackupScheduler
+      :status="backupStatus"
+      :destinations="backupDestinations"
+      :runs="backupRuns"
+      @changed="reloadBackups"
+    />
+
     <div class="card">
-      <h2>Backup</h2>
+      <h2>Manual backup</h2>
       <p class="muted">
-        Download a full database backup (SQL) — restorable into a fresh Postgres if
-        this box is ever lost. It contains all customer data, so store it somewhere
-        safe.
+        Download a full database backup (SQL) right now — useful for taking a
+        snapshot before a risky change. It is <strong>not encrypted</strong> and it
+        contains all customer data, so store it somewhere safe and delete it when
+        you’re done. Protection against losing this server is the schedule above,
+        not this button.
       </p>
       <button class="ghost" type="button" :disabled="backingUp" @click="backup">
         {{ backingUp ? 'Preparing…' : 'Download database backup' }}

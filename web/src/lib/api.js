@@ -133,6 +133,23 @@ export const api = {
   connectGoogle: (body) => request('/email/google', { method: 'POST', body }),
   disconnectGoogle: () => request('/email/google', { method: 'DELETE' }),
 
+  // --- scheduled backups (admin) ---
+  // The passphrase is write-only: it can be set, never read back. `status` says
+  // whether one exists, not what it is.
+  getBackupStatus: () => request('/admin/backup/status'),
+  setBackupPassphrase: (passphrase) =>
+    request('/admin/backup/passphrase', { method: 'POST', body: { passphrase } }),
+  listBackupDestinations: () => request('/admin/backup/destinations'),
+  createBackupDestination: (body) =>
+    request('/admin/backup/destinations', { method: 'POST', body }),
+  updateBackupDestination: (id, patch) =>
+    request(`/admin/backup/destinations/${id}`, { method: 'PATCH', body: patch }),
+  deleteBackupDestination: (id) =>
+    request(`/admin/backup/destinations/${id}`, { method: 'DELETE' }),
+  // Runs inline and returns the real error, which is the point of pressing it.
+  runBackupNow: (id) => request(`/admin/backup/destinations/${id}/run`, { method: 'POST' }),
+  listBackupRuns: () => request('/admin/backup/runs'),
+
   // Mark an order ready to collect; queues the customer's "it's ready" email.
   fulfilOrder: (id) => request(`/orders/${id}/fulfil`, { method: 'POST' }),
   listCustomers: (email) =>

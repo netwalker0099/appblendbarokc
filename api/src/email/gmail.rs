@@ -28,21 +28,14 @@
 //! *sensitive* scope rather than a *restricted* one, and for an app used inside
 //! its own Workspace, Google requires no verification or CASA assessment.
 
-use std::time::{Duration, Instant};
-
 use async_trait::async_trait;
 use base64::engine::general_purpose::URL_SAFE;
 use base64::Engine;
-use jsonwebtoken::{Algorithm, EncodingKey, Header};
-use lettre::message::{header::ContentType, MultiPart, SinglePart};
-use lettre::Message;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
-use tokio::sync::Mutex;
 
 use super::{MailError, Mailer, Outgoing};
 
-const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const SEND_URL: &str = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
 const SCOPE: &str = "https://www.googleapis.com/auth/gmail.send";
 
@@ -68,194 +61,27 @@ impl std::fmt::Debug for ServiceAccount {
     }
 }
 
-#[derive(Serialize)]
-struct Assertion<'a> {
-    iss: &'a str,
-    scope: &'a str,
-    aud: &'a str,
-    /// The mailbox to act as. This claim *is* the domain-wide delegation.
-    sub: &'a str,
-    iat: u64,
-    exp: u64,
-}
-
-struct CachedToken {
-    value: String,
-    /// When it stops being usable. Refreshed early, never on the boundary.
-    expires_at: Instant,
-}
-
+/// The mailer holds a token source rather than the JWT machinery itself; see
+/// `crate::google`, which Drive backups share.
 pub struct GmailMailer {
-    client: reqwest::Client,
-    account: ServiceAccount,
-    key: EncodingKey,
-    impersonate: String,
-    token: Mutex<Option<CachedToken>>,
+    tokens: crate::google::TokenSource,
 }
 
 impl GmailMailer {
     pub fn new(account: ServiceAccount, impersonate: String) -> Result<Self, MailError> {
-        // Google issues PKCS#8 PEM. Parsed once at startup so a malformed key is
-        // a boot-time error rather than a surprise on the first customer email.
-        let key = EncodingKey::from_rsa_pem(account.private_key.as_bytes()).map_err(|e| {
-            MailError::NotConfigured(format!(
-                "service account private_key is not a usable RSA PEM: {e}"
-            ))
-        })?;
-
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(20))
-            .build()
-            .map_err(|e| MailError::NotConfigured(e.to_string()))?;
-
         Ok(Self {
-            client,
-            account,
-            key,
-            impersonate,
-            token: Mutex::new(None),
+            tokens: crate::google::TokenSource::new(account, impersonate, SCOPE)?,
         })
     }
-
-    /// A valid access token, minted on demand and cached until shortly before it
-    /// expires.
-    async fn access_token(&self) -> Result<String, MailError> {
-        let mut guard = self.token.lock().await;
-
-        if let Some(cached) = guard.as_ref() {
-            if Instant::now() < cached.expires_at {
-                return Ok(cached.value.clone());
-            }
-        }
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| MailError::Transport(e.to_string()))?
-            .as_secs();
-
-        let claims = Assertion {
-            iss: &self.account.client_email,
-            scope: SCOPE,
-            aud: TOKEN_URL,
-            sub: &self.impersonate,
-            iat: now,
-            // Google caps assertion lifetime at an hour.
-            exp: now + 3600,
-        };
-
-        let mut header = Header::new(Algorithm::RS256);
-        if !self.account.private_key_id.is_empty() {
-            header.kid = Some(self.account.private_key_id.clone());
-        }
-
-        let assertion = jsonwebtoken::encode(&header, &claims, &self.key)
-            .map_err(|e| MailError::NotConfigured(format!("could not sign assertion: {e}")))?;
-
-        let resp = self
-            .client
-            .post(TOKEN_URL)
-            .form(&[
-                ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
-                ("assertion", &assertion),
-            ])
-            .send()
-            .await
-            .map_err(|e| MailError::Transport(format!("token request failed: {e}")))?;
-
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-
-        if !status.is_success() {
-            // The usual cause is the delegation not being authorised, or being
-            // authorised for a different scope. Say so — the raw Google error is
-            // terse and this is the step people get wrong.
-            return Err(MailError::NotConfigured(format!(
-                "Google refused the service-account assertion ({status}): {}. \
-                 Check that client id {} is authorised for {SCOPE} under Admin → \
-                 Security → API controls → Domain-wide delegation, and that {} is \
-                 a real mailbox on the domain.",
-                summarise(&text),
-                self.account.client_email,
-                self.impersonate,
-            )));
-        }
-
-        #[derive(Deserialize)]
-        struct TokenResponse {
-            access_token: String,
-            expires_in: u64,
-        }
-
-        let parsed: TokenResponse = serde_json::from_str(&text)
-            .map_err(|e| MailError::Transport(format!("unreadable token response: {e}")))?;
-
-        // Refresh a minute early so a request never races the expiry.
-        let expires_at =
-            Instant::now() + Duration::from_secs(parsed.expires_in.saturating_sub(60).max(30));
-
-        *guard = Some(CachedToken {
-            value: parsed.access_token.clone(),
-            expires_at,
-        });
-
-        Ok(parsed.access_token)
-    }
 }
 
-/// Google's errors arrive as `{"error":"...","error_description":"..."}`.
-fn summarise(body: &str) -> String {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
-        return body.chars().take(200).collect();
-    };
-    let code = v.get("error").and_then(|x| x.as_str()).unwrap_or("");
-    let detail = v
-        .get("error_description")
-        .and_then(|x| x.as_str())
-        .unwrap_or("");
-    if code.is_empty() && detail.is_empty() {
-        body.chars().take(200).collect()
-    } else {
-        format!("{code}: {detail}").trim_matches(|c| c == ':' || c == ' ').to_string()
-    }
-}
+/// Shared with the Drive backup uploader, which has to explain the same class of
+/// Google failure.
+use crate::google::summarise;
 
 /// Build the RFC 5322 message and base64url it, which is what `raw` wants.
 fn encode_message(message: &Outgoing) -> Result<String, MailError> {
-    let from = format!("{} <{}>", message.from_name, message.from_address)
-        .parse()
-        .map_err(|e| MailError::NotConfigured(format!("bad from address: {e}")))?;
-    let to = message
-        .to
-        .parse()
-        .map_err(|e| MailError::Rejected(format!("bad recipient '{}': {e}", message.to)))?;
-
-    let mut builder = Message::builder()
-        .from(from)
-        .to(to)
-        .subject(message.body.subject.clone());
-
-    if let Some(reply_to) = &message.reply_to {
-        if let Ok(parsed) = reply_to.parse() {
-            builder = builder.reply_to(parsed);
-        }
-    }
-
-    let email = builder
-        .multipart(
-            MultiPart::alternative()
-                .singlepart(
-                    SinglePart::builder()
-                        .header(ContentType::TEXT_PLAIN)
-                        .body(message.body.text.clone()),
-                )
-                .singlepart(
-                    SinglePart::builder()
-                        .header(ContentType::TEXT_HTML)
-                        .body(message.body.html.clone()),
-                ),
-        )
-        .map_err(|e| MailError::Rejected(format!("could not build message: {e}")))?;
-
+    let email = super::build_mime(message)?;
     Ok(URL_SAFE.encode(email.formatted()))
 }
 
@@ -271,11 +97,12 @@ impl Mailer for GmailMailer {
 
     async fn send(&self, message: Outgoing) -> Result<(), MailError> {
         let raw = encode_message(&message)?;
-        let token = self.access_token().await?;
+        let token = self.tokens.access_token().await?;
 
         // `users/me` is the impersonated mailbox, not the service account.
         let resp = self
-            .client
+            .tokens
+            .http()
             .post(SEND_URL)
             .bearer_auth(&token)
             .json(&json!({ "raw": raw }))
@@ -299,7 +126,8 @@ impl Mailer for GmailMailer {
         } else {
             Err(MailError::Rejected(format!(
                 "{status}: {detail} (sending as {} on behalf of {})",
-                message.from_address, self.impersonate
+                message.from_address,
+                self.tokens.impersonate()
             )))
         }
     }
@@ -347,6 +175,7 @@ mod tests {
             from_name: "The Blend Bar".into(),
             reply_to: Some("replies@theblendbarokc.com".into()),
             body: templates::magic_link("https://x.test/portal/verify?token=abc", 15),
+            attachments: Vec::new(),
         }
     }
 
