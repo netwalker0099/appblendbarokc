@@ -837,14 +837,11 @@ function formatTime(value) {
   padding: 0.5rem 0;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
-  /* On a tablet the six tabs won't fit; scroll them rather than wrap into a
-     block that pushes the content down. */
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.tabstrip::-webkit-scrollbar {
-  display: none;
+  /* Wrap onto a second row when the tabs won't fit — they used to scroll
+     horizontally with the scrollbar hidden, which silently cut "Data" off the
+     right edge on a tablet. A tab nobody can see is a feature nobody can use;
+     the row of extra height costs less than that. */
+  flex-wrap: wrap;
 }
 
 .tabstrip button {
