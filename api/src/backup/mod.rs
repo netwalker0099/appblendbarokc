@@ -70,6 +70,14 @@ pub enum BackupError {
     NotConfigured(String),
     /// The destination refused it — too large, no permission, gone.
     Rejected(String),
+    /// A recovered archive file is malformed, or is not ours. Distinct from
+    /// `Internal` because it is the operator's file that is wrong, not the code,
+    /// and the message needs to reach them intact.
+    BadArchive(String),
+    /// The operation is refused because of the system's current state, and a
+    /// human has to resolve it. Reaches the browser verbatim — "internal server
+    /// error" would leave someone with no idea why nothing was archived.
+    Blocked(String),
     /// Network or transient server problem. Worth another attempt.
     Transport(String),
     Internal(String),
@@ -80,6 +88,8 @@ impl std::fmt::Display for BackupError {
         match self {
             BackupError::NotConfigured(m) => write!(f, "not configured: {m}"),
             BackupError::Rejected(m) => write!(f, "rejected: {m}"),
+            BackupError::BadArchive(m) => write!(f, "unusable archive: {m}"),
+            BackupError::Blocked(m) => write!(f, "{m}"),
             BackupError::Transport(m) => write!(f, "transport error: {m}"),
             BackupError::Internal(m) => write!(f, "{m}"),
         }
@@ -94,6 +104,8 @@ impl From<BackupError> for crate::error::AppError {
             // opaque 500.
             BackupError::NotConfigured(m) => crate::error::AppError::BadRequest(m),
             BackupError::Rejected(m) => crate::error::AppError::BadRequest(m),
+            BackupError::BadArchive(m) => crate::error::AppError::BadRequest(m),
+            BackupError::Blocked(m) => crate::error::AppError::Conflict(m),
             BackupError::Transport(m) => crate::error::AppError::Unavailable(m),
             BackupError::Internal(m) => crate::error::AppError::Internal(m),
         }
@@ -521,6 +533,26 @@ pub async fn run_worker(state: AppState) {
         if let Err(e) = poll(&state).await {
             tracing::error!("backup worker poll failed: {e}");
         }
+
+        // Audit retention rides on the same tick rather than owning a worker.
+        // It archives to the same destinations using the same encryption, and
+        // `run` returns immediately when retention is off or nothing is old
+        // enough — which is almost always. Sharing the loop also means an
+        // archive can never be attempted while a backup is mid-flight on this
+        // single-threaded schedule.
+        match crate::audit::archive::run(&state).await {
+            Ok(Some(outcome)) => tracing::info!(
+                "audit retention: archived {} entries as {} to {}",
+                outcome.entry_count,
+                outcome.filename,
+                outcome.delivered_to.join(", ")
+            ),
+            Ok(None) => {}
+            // Loud, and nothing was pruned — see the module docs on why that is
+            // the safe direction to fail in.
+            Err(e) => tracing::error!("audit retention did not run: {e}"),
+        }
+
         tokio::time::sleep(POLL_INTERVAL).await;
     }
 }

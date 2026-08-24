@@ -34,6 +34,8 @@
 //! cannot even be removed afterwards. [`redact`] works from a denylist of key
 //! names and is applied before anything is stored.
 
+pub mod archive;
+
 use axum::body::{Body, Bytes};
 use axum::extract::{Request, State};
 use axum::middleware::Next;

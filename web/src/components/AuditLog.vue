@@ -24,6 +24,12 @@ const expanded = ref(new Set())
 const chain = ref(null)
 const verifying = ref(false)
 
+const segments = ref([])
+const retention = ref(0)
+const savingRetention = ref(false)
+const archiving = ref(false)
+const notice = ref('')
+
 const filters = reactive({
   actor: '',
   // Defaults to admin actions: the log records every employee mutation, and
@@ -37,7 +43,57 @@ const filters = reactive({
 const PAGE = 100
 const offset = ref(0)
 
-onMounted(() => load(true))
+onMounted(() => {
+  load(true)
+  loadRetention()
+})
+
+async function loadRetention() {
+  try {
+    const [settings, segs] = await Promise.all([api.getSettings(), api.listAuditSegments()])
+    retention.value = settings.audit_retention_days ?? 0
+    segments.value = segs
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function saveRetention() {
+  savingRetention.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    await api.updateSettings({ audit_retention_days: Number(retention.value) })
+    notice.value =
+      Number(retention.value) === 0
+        ? 'Retention is off — every entry is kept in the database.'
+        : `Entries older than ${retention.value} days will be archived off-box, then removed.`
+    await loadRetention()
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    savingRetention.value = false
+  }
+}
+
+async function archiveNow() {
+  archiving.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const res = await api.archiveAuditNow()
+    notice.value = res.archived
+      ? `Archived ${res.entry_count} entries as ${res.filename}, delivered to ${res.delivered_to.join(', ')}.`
+      : res.reason
+    await Promise.all([load(true), loadRetention()])
+  } catch (e) {
+    // Retention refuses to prune what it could not deliver, so the error IS the
+    // useful outcome here — it says why nothing was removed.
+    error.value = e.message
+  } finally {
+    archiving.value = false
+  }
+}
 
 async function load(reset = false) {
   loading.value = true
@@ -98,6 +154,7 @@ function hasDetail(entry) {
     <h2>Activity log</h2>
 
     <p class="error" v-if="error">{{ error }}</p>
+    <p class="notice" v-if="notice">{{ notice }}</p>
 
     <p class="muted">
       Every change made by a signed-in member of staff, plus database downloads.
@@ -133,6 +190,81 @@ function hasDetail(entry) {
           prove later that nothing was rewritten — including by someone with full
           database access, which the chain alone cannot rule out.
         </p>
+      </template>
+    </div>
+
+    <!-- Retention -->
+    <div class="chain">
+      <h3 class="sub-heading">Retention</h3>
+      <p class="muted">
+        The log only grows. Rather than deleting old entries, anything past the
+        window is written to an encrypted archive, sent to your backup
+        destinations, and only then removed from the table. If it cannot be
+        delivered anywhere, nothing is removed — the table grows instead, which is
+        the safe way to fail.
+      </p>
+      <div class="row">
+        <div class="field">
+          <label>Keep entries in the database for</label>
+          <select v-model="retention">
+            <option :value="0">Forever (never archive)</option>
+            <option :value="90">90 days</option>
+            <option :value="180">180 days</option>
+            <option :value="365">1 year</option>
+            <option :value="730">2 years</option>
+          </select>
+        </div>
+      </div>
+      <button class="ghost" type="button" :disabled="savingRetention" @click="saveRetention">
+        {{ savingRetention ? 'Saving…' : 'Save retention' }}
+      </button>
+      <button
+        class="ghost"
+        type="button"
+        v-if="Number(retention) > 0"
+        :disabled="archiving"
+        @click="archiveNow"
+      >
+        {{ archiving ? 'Archiving…' : 'Archive now' }}
+      </button>
+
+      <template v-if="segments.length">
+        <h4 class="sub-heading">Archived off-box</h4>
+        <table class="audit-table">
+          <thead>
+            <tr>
+              <th>Period</th>
+              <th>Entries</th>
+              <th>File</th>
+              <th>Sent to</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="s in segments" :key="s.id">
+              <td class="when">
+                {{ formatWhen(s.from_at) }}
+                <span class="sub">to {{ formatWhen(s.to_at) }}</span>
+              </td>
+              <td>
+                {{ s.entry_count }}
+                <span class="sub">#{{ s.from_id }}–{{ s.to_id }}</span>
+              </td>
+              <td>
+                <code class="filename">{{ s.filename }}</code>
+                <span class="sub">sha256 {{ s.content_sha256.slice(0, 16) }}…</span>
+              </td>
+              <td>
+                <span v-for="(d, i) in s.destinations" :key="i" class="sub">{{ d.destination }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="muted">
+          These records are permanent and are never pruned — they are what lets the
+          chain above still verify across an archived gap. To read one back:
+        </p>
+        <pre class="restore">age -d blendbar-audit-….jsonl.gz.age | gunzip &gt; segment.jsonl
+docker compose exec -T api blendbar-api import-audit-archive /tmp/segment.jsonl</pre>
       </template>
     </div>
 
@@ -253,6 +385,32 @@ function hasDetail(entry) {
 .chain-head {
   margin: 0.7rem 0 0;
   font-size: 0.78rem;
+}
+
+.sub-heading {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+h4.sub-heading {
+  margin-top: 1.4rem;
+  font-size: 0.85rem;
+}
+
+.filename {
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+.restore {
+  margin: 0.4rem 0 0;
+  padding: 0.7rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.76rem;
+  overflow-x: auto;
+  white-space: pre;
 }
 
 .audit-table {

@@ -14,4 +14,7 @@ pub struct Settings {
     pub referral_reward_cents: i64,
     /// 0 means coupons never expire.
     pub coupon_expiry_days: i32,
+    /// Days of audit history kept in the table; 0 keeps everything. Anything
+    /// older is archived off-box and pruned only once delivered.
+    pub audit_retention_days: i32,
 }

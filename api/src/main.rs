@@ -82,6 +82,40 @@ async fn main() {
         return;
     }
 
+    // Put a recovered audit archive back into the table.
+    //
+    // Takes the *decrypted* file, so recovery is two plain steps with an
+    // inspectable artefact in between:
+    //
+    //   age -d blendbar-audit-….jsonl.gz.age | gunzip > segment.jsonl
+    //   docker compose exec -T api blendbar-api import-audit-archive /tmp/segment.jsonl
+    //
+    // Deliberately not a browser upload. Restoring history is a rare, deliberate
+    // act by someone with shell access, and an HTTP endpoint that writes into the
+    // audit log would be a hole in the thing the log exists to protect.
+    if args.get(1).map(String::as_str) == Some("import-audit-archive") {
+        let path = args
+            .get(2)
+            .expect("usage: blendbar-api import-audit-archive <decrypted .jsonl file>");
+        let contents = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("could not read {path}: {e}"));
+        let pool = db::connect(&database_url)
+            .await
+            .expect("failed to connect to database or run migrations");
+
+        match audit::archive::import(&pool, &contents).await {
+            Ok(n) => {
+                println!("Imported {n} audit entries from {path}.");
+                println!("Now confirm the chain still verifies: Admin → Activity → Verify.");
+            }
+            Err(e) => {
+                eprintln!("Import failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     if args.get(1).map(String::as_str) == Some("create-admin") {
         let email = args
             .get(2)

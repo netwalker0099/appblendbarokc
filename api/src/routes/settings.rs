@@ -12,7 +12,7 @@ use crate::AppState;
 
 const COLS: &str = "custom_price_oz3_4, custom_price_oz1_7, custom_price_roller, \
      custom_price_spray, referral_enabled, referral_discount_cents, \
-     referral_reward_cents, coupon_expiry_days";
+     referral_reward_cents, coupon_expiry_days, audit_retention_days";
 
 pub async fn get(
     _admin: AdminEmployee,
@@ -35,6 +35,10 @@ pub struct UpdateSettings {
     pub referral_discount_cents: Option<i64>,
     pub referral_reward_cents: Option<i64>,
     pub coupon_expiry_days: Option<i32>,
+    /// Days of audit history to keep in the table. 0 keeps everything.
+    /// Anything older is archived off-box and only then pruned — see
+    /// `audit::archive`.
+    pub audit_retention_days: Option<i32>,
 }
 
 pub async fn update(
@@ -71,6 +75,15 @@ pub async fn update(
             "coupon expiry can't be negative — use 0 for never".into(),
         ));
     }
+    // A floor rather than just a non-negative check. A one-day retention would
+    // start shipping today's audit entries off-box within hours, which is not a
+    // setting anyone wants by accident — and the archive only becomes readable
+    // again by decrypting a file.
+    if body.audit_retention_days.is_some_and(|d| d != 0 && d < 30) {
+        return Err(AppError::BadRequest(
+            "audit retention must be 0 (keep everything) or at least 30 days".into(),
+        ));
+    }
 
     let s = sqlx::query_as::<_, Settings>(&format!(
         "update settings set custom_price_oz3_4 = $1, custom_price_oz1_7 = $2, \
@@ -78,7 +91,8 @@ pub async fn update(
          referral_enabled = coalesce($5, referral_enabled), \
          referral_discount_cents = coalesce($6, referral_discount_cents), \
          referral_reward_cents = coalesce($7, referral_reward_cents), \
-         coupon_expiry_days = coalesce($8, coupon_expiry_days) \
+         coupon_expiry_days = coalesce($8, coupon_expiry_days), \
+         audit_retention_days = coalesce($9, audit_retention_days) \
          where id = true returning {COLS}"
     ))
     .bind(body.custom_price_oz3_4)
@@ -89,6 +103,7 @@ pub async fn update(
     .bind(body.referral_discount_cents)
     .bind(body.referral_reward_cents)
     .bind(body.coupon_expiry_days)
+    .bind(body.audit_retention_days)
     .fetch_one(&state.db)
     .await?;
     Ok(Json(s))

@@ -128,6 +128,10 @@ pub fn build_router(state: AppState) -> Router {
         // that writes or deletes one — the database refuses those anyway.
         .route("/api/admin/audit", get(audit_log::list))
         .route("/api/admin/audit/verify", get(audit_log::verify))
+        .route("/api/admin/audit/segments", get(audit_log::segments))
+        // Archiving is a POST because it changes things — and, like every other
+        // mutation, the act of archiving is itself written to the audit log.
+        .route("/api/admin/audit/archive", post(audit_log::archive_now))
         .route("/api/settings", get(settings::get).patch(settings::update))
         .route("/api/employees", get(employees::list).post(employees::create))
         .route("/api/employees/:id", patch(employees::update))

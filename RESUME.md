@@ -850,9 +850,62 @@ the alternative, not taken because customer access is likely later — see below
     DELETE / TRUNCATE all refused; then, with the triggers deliberately dropped,
     an edited row was caught ("contents do not match the stored hash") and a
     deleted row was caught via the broken link on its successor.
-  - **Not addressed**: retention. The table only grows, and nothing prunes it
-    (pruning an append-only log is a contradiction that needs a deliberate
-    answer — probably archiving a signed segment off-box, not deleting).
+  - **Retention (2026-08-24, migration `0020_audit_retention.sql`)**:
+    archive-then-prune, never a bare DELETE. `settings.audit_retention_days`
+    (0 = keep everything, the default; minimum 30 when on). Entries past the
+    window are serialised to JSON Lines, SHA-256'd, encrypted with the *same*
+    backup pipeline, delivered to **every enabled backup destination**, and only
+    then removed. Code in `api/src/audit/archive.rs`, run from the backup
+    worker's tick.
+    - **Delivery precedes deletion, always.** No destination, or all deliveries
+      fail → nothing is pruned and the table grows. A log that deleted itself
+      because an upload failed is the thing you needed and cannot get back.
+    - **Archives are not `backup_runs`** — deliberately. Backups rotate under a
+      retention count; an archive segment holds the only surviving copy of that
+      history, so rotating one away would destroy it. Recorded in
+      `audit_archive_segments`, never pruned.
+    - `audit_archive_segments` keeps the receipt forever: id/time range, entry
+      count, the chain hash on **both** sides of the gap, a checksum of the
+      exported bytes, and where copies went. Those anchors are what let a pruned
+      log still verify. The table is itself append-only.
+    - **The one sanctioned delete**: the trigger permits DELETE only while
+      `blendbar.audit_archiving` is set, which the archiver sets transaction-
+      locally after delivery. A small real weakening — anyone who can run SQL can
+      set it — but they could already drop the trigger, so it grants nothing new,
+      and the chain (the actual defence) is untouched.
+    - **Restore path**: `blendbar-api import-audit-archive <decrypted .jsonl>`.
+      Re-inserts with original ids and hashes (trigger stands aside under
+      `blendbar.audit_restoring`, and only when both hashes are supplied, so the
+      flag cannot smuggle in an unchained row). Refuses to import over entries
+      that are still present. Deliberately CLI-only: an HTTP endpoint that writes
+      into the audit log would be a hole in what the log protects.
+    - **Only a contiguous prefix is ever archived** — everything strictly before
+      the first entry too new to go. `where at < cutoff` looks equivalent and is
+      not: `at` and `id` only advance together until something is inserted with a
+      backdated timestamp, and then that query selects a *hole in the middle*,
+      whose removal is indistinguishable from tampering. Found by testing with
+      backdated rows, which is the only way it shows up.
+    - **Verified 2026-08-24** against a copy of the live schema: pruning 3 of 6
+      entries with a segment recorded → chain still verifies clean; deleting one
+      *without* a segment → caught ("previous-hash mismatch"); segment records
+      refuse UPDATE and DELETE; a forged segment whose anchor does not continue
+      the chain → caught ("archive segment N does not continue the chain"). Also
+      confirmed the archiving flag is transaction-scoped and cannot leak. Live:
+      retention rejects <30 days and negatives; with no deliverable destination
+      "Archive now" refuses and prunes nothing (the safe failure).
+
+  - **The audit log is already inside every database backup**, and survives
+    restore intact: `pg_dump` writes triggers in the post-data section, *after*
+    the COPY, so the stored hashes come back verbatim rather than being
+    recomputed by the insert trigger. **Proven 2026-08-24**: a real encrypted
+    backup was decrypted with the stock `age` CLI and restored into a scratch DB
+    — all 14 entries present, every `entry_hash` byte-identical to the original,
+    and `verify_admin_audit_chain()` clean. Then the same log was exported through
+    the real serialiser, its rows deleted, and re-imported with
+    `blendbar-api import-audit-archive`: ids and hashes preserved exactly, chain
+    verified again. Importing over existing entries is refused, and feeding in
+    the database backup by mistake is named as such rather than failing on a JSON
+    parse error.
 
 **Future intent:** the owner may open this to **customers for online scent
 reordering**. That's a major security shift — it means real customer login/auth,

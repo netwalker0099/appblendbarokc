@@ -100,6 +100,64 @@ pub async fn list(
     })))
 }
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct Segment {
+    pub id: i64,
+    pub from_id: i64,
+    pub to_id: i64,
+    pub entry_count: i64,
+    pub from_at: DateTime<Utc>,
+    pub to_at: DateTime<Utc>,
+    pub content_sha256: String,
+    pub filename: String,
+    pub destinations: Value,
+    pub created_at: DateTime<Utc>,
+}
+
+/// History that has been archived off-box and pruned from the table.
+///
+/// These rows are the receipt. They are never removed, they are tiny, and they
+/// are what lets the chain still verify across the gap — so an archived span is
+/// visibly *archived* rather than indistinguishable from a deletion.
+pub async fn segments(
+    _admin: AdminEmployee,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<Segment>>, AppError> {
+    let rows = sqlx::query_as::<_, Segment>(
+        "select id, from_id, to_id, entry_count, from_at, to_at, content_sha256, \
+                filename, destinations, created_at \
+           from audit_archive_segments order by from_id desc",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(rows))
+}
+
+/// Archive now, rather than waiting for the worker's tick.
+///
+/// Runs inline so the caller gets the real error. Retention refuses to prune
+/// anything it could not deliver, and this is the button that surfaces *why*
+/// rather than leaving it in the server log.
+pub async fn archive_now(
+    _admin: AdminEmployee,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, AppError> {
+    match crate::audit::archive::run(&state).await? {
+        Some(o) => Ok(Json(json!({
+            "archived": true,
+            "segment_id": o.segment_id,
+            "entry_count": o.entry_count,
+            "filename": o.filename,
+            "bytes": o.bytes,
+            "delivered_to": o.delivered_to,
+        }))),
+        None => Ok(Json(json!({
+            "archived": false,
+            "reason": "nothing is older than the retention window (or retention is off)",
+        }))),
+    }
+}
+
 /// Recompute the hash chain and report any break.
 ///
 /// This is the part that makes the log worth trusting. Without it the chain is

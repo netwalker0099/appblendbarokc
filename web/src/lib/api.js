@@ -161,6 +161,10 @@ export const api = {
   },
   // Recomputes the hash chain server-side and reports any break.
   verifyAuditChain: () => request('/admin/audit/verify'),
+  // History archived off-box and pruned. These records are permanent.
+  listAuditSegments: () => request('/admin/audit/segments'),
+  // Archive-then-prune, inline, so the caller sees why it refused.
+  archiveAuditNow: () => request('/admin/audit/archive', { method: 'POST' }),
 
   // Mark an order ready to collect; queues the customer's "it's ready" email.
   fulfilOrder: (id) => request(`/orders/${id}/fulfil`, { method: 'POST' }),
