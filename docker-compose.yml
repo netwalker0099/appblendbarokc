@@ -53,6 +53,10 @@ services:
       # credential never lives in Postgres — where it would be copied into every
       # downloaded database backup.
       - email_secrets:/var/lib/blendbar/secrets
+      # Encrypted "before the restore" copies of the database. A named volume so
+      # the way back survives the container being recreated on deploy — a safety
+      # net that disappears with the container is not one.
+      - restore_safety:/var/lib/blendbar/safety
     expose:
       - "8080"
     healthcheck:
@@ -82,5 +86,6 @@ services:
 volumes:
   pgdata:
   email_secrets:
+  restore_safety:
   caddy_data:
   caddy_config:

@@ -166,6 +166,10 @@ export const api = {
   // Archive-then-prune, inline, so the caller sees why it refused.
   archiveAuditNow: () => request('/admin/audit/archive', { method: 'POST' }),
 
+  // --- restore (admin) ---
+  // Encrypted copies taken automatically immediately before each restore.
+  listSafetyCopies: () => request('/admin/backup/safety-copies'),
+
   // Mark an order ready to collect; queues the customer's "it's ready" email.
   fulfilOrder: (id) => request(`/orders/${id}/fulfil`, { method: 'POST' }),
   listCustomers: (email) =>
@@ -191,6 +195,39 @@ export const api = {
       body,
       headers: { 'Idempotency-Key': idempotencyKey },
     }),
+}
+
+/// Uploads a backup file. Raw bytes, not JSON, so it bypasses `request()`.
+///
+/// Without `confirmPhrase` the server only inspects: it decrypts the file, loads
+/// it into a scratch database and reports what is inside, leaving the live data
+/// alone. Passing the phrase is what makes it destructive — opt-in via a header,
+/// so a malformed request inspects rather than destroys.
+export async function uploadBackupForRestore(file, confirmPhrase = null) {
+  const res = await fetch('/api/admin/backup/restore', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      ...(confirmPhrase ? { 'X-Restore-Confirm': confirmPhrase } : {}),
+    },
+    body: file,
+  })
+  if (res.status === 401) {
+    onUnauthorized()
+    throw new ApiError('unauthorized', 401)
+  }
+  let payload = null
+  try {
+    payload = await res.json()
+  } catch {
+    // A restore restarts the API, so the response can be cut off mid-flight.
+    // Treated as success only when the status says so.
+  }
+  if (!res.ok) {
+    throw new ApiError(payload?.error || `restore failed (${res.status})`, res.status)
+  }
+  return payload
 }
 
 /// Fetches the full DB backup as a file. Not JSON, so it bypasses `request()` —

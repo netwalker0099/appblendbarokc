@@ -15,12 +15,14 @@ pub mod notifications;
 pub mod orders;
 pub mod public;
 pub mod reconciliation;
+pub mod restore;
 pub mod scents;
 pub mod session;
 pub mod settings;
 pub mod square_webhooks;
 pub mod sync;
 
+use axum::extract::DefaultBodyLimit;
 use axum::middleware;
 use axum::routing::{get, patch, post};
 use axum::Router;
@@ -124,6 +126,20 @@ pub fn build_router(state: AppState) -> Router {
             post(backup_admin::run_now),
         )
         .route("/api/admin/backup/runs", get(backup_admin::runs))
+        // Upload a backup. Without the confirmation header this only inspects,
+        // so destruction is opt-in and a malformed request cannot cause it. The
+        // body limit is raised well past the default 2MB: this is a whole
+        // database, and a silently truncated upload is the worst possible input
+        // to a restore.
+        .route(
+            "/api/admin/backup/restore",
+            post(restore::upload).layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
+        )
+        .route("/api/admin/backup/safety-copies", get(restore::safety_copies))
+        .route(
+            "/api/admin/backup/safety-copies/:name",
+            get(restore::download_safety_copy),
+        )
         // Read-only views onto the audit log. There is deliberately no handler
         // that writes or deletes one — the database refuses those anyway.
         .route("/api/admin/audit", get(audit_log::list))

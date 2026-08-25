@@ -788,6 +788,60 @@ hashed. Errors don't leak internals. No Squarespace secrets reach the browser.
     deployment. Adding it later is a new file behind `backup::destination::Backend`,
     not a migration.
 
+- **Restore from an uploaded backup (2026-08-25)**: `api/src/backup/restore.rs`,
+  route `POST /api/admin/backup/restore` (`routes/restore.rs`), UI in
+  `web/src/components/BackupRestore.vue` at the bottom of Admin → Data.
+  - **Why the upload endpoint is not an RCE hole.** A `.sql` file can contain
+    `COPY … FROM PROGRAM`, so an endpoint that ran uploaded SQL would turn one
+    stolen admin session into code execution on the DB container. The upload must
+    **decrypt with the backup passphrase** before a byte reaches `psql`; that
+    passphrase is not in the database, is never returned by any endpoint, and is
+    not derivable from a session. Not a perfect boundary — someone *holding* the
+    passphrase could craft a malicious dump — but it reduces the endpoint from
+    "run my SQL" to "run SQL from someone who already holds the backup key".
+  - **Inspect is the default; destruction is opt-in** via the header
+    `X-Restore-Confirm: REPLACE ALL DATA`. A malformed or truncated request
+    therefore inspects rather than destroys. The UI inspects on file-select and
+    only enables the red button once the phrase is typed.
+  - Staging: decrypt → sanity-check it is a *Blend Bar* dump (customers,
+    employees, `_sqlx_migrations` present) → **trial restore into a scratch
+    database** (proves it loads and yields the per-table row counts shown before
+    deciding; live data untouched) → **encrypted safety copy** of the current DB
+    to the `restore_safety` volume (last 5 kept, downloadable in the UI) →
+    live restore → re-run migrations.
+  - **Live restore is `psql --single-transaction -v ON_ERROR_STOP=1`** over
+    `drop schema public cascade; create schema public;` + the dump. Our dumps
+    contain no `CREATE SCHEMA` (checked), so the drop is required; wrapping it
+    with the dump in one transaction means a failure rolls the drop back too and
+    the original data survives.
+  - **Migrations re-run afterwards** — a backup from before the last deploy has
+    an older schema, and new code on an old schema fails in tedious ways.
+  - **The process exits ~2s after responding** (compose `restart: unless-stopped`
+    restarts it). The pool's prepared statements were planned against the dropped
+    schema; without a restart, queries fail with "cached plan must not change
+    result type".
+  - **The restore writes its own audit entry** over a fresh connection, because
+    the audit middleware runs after the handler on the *shared* pool and will
+    likely fail for the same cached-plan reason. Losing the record of the most
+    destructive action available is not acceptable; a duplicate entry is the
+    better failure. It chains onto the restored log's head — this database's
+    history genuinely continues from the backup's.
+  - Safety-copy filenames are validated, not trusted (they arrive from the
+    browser and are used as a path).
+  - **Verified 2026-08-25 end to end against a scratch database** (never
+    production — it holds real catalog data). A one-off API container was pointed
+    at a copy of live. Refused: plaintext upload, empty upload, undecryptable
+    file, and a wrong confirmation phrase — all with data untouched. Inspect
+    reported 33 tables / 102 rows / source version and cleaned up its trial
+    database. Then 5 marker rows were added and a confirmed restore removed them
+    and brought the original 18 ingredients / 7 orders back; the safety copy was
+    written; the restore wrote its own audit entry and the restored chain
+    verified; the process exited 0 (the self-restart). Finally the **safety copy
+    was uploaded back and undid the restore** — markers returned, 112 rows
+    restored. In that run the middleware entry *also* succeeded, so the log had
+    both it and the explicit one: the intended "a duplicate is the better
+    failure" trade-off, observed.
+
 **Chosen direction:** put **Cloudflare** in front (WAF + rate limiting + DDoS +
 hide origin IP) — not yet configured; it's the planned network layer. (VPN-only was
 the alternative, not taken because customer access is likely later — see below.)
@@ -850,6 +904,11 @@ the alternative, not taken because customer access is likely later — see below
     DELETE / TRUNCATE all refused; then, with the triggers deliberately dropped,
     an edited row was caught ("contents do not match the stored hash") and a
     deleted row was caught via the broken link on its successor.
+  - **Reset to zero on 2026-08-25** at the owner's request: the log contained
+    only verification actions from the day it shipped, including three fabricated
+    backdated rows used to exercise the archiver. Emptied via the sanctioned
+    archiving path and the sequence restarted at 1, so the chain begins fresh
+    from genesis. Verification is clean; real usage starts the history.
   - **Retention (2026-08-24, migration `0020_audit_retention.sql`)**:
     archive-then-prune, never a bare DELETE. `settings.audit_retention_days`
     (0 = keep everything, the default; minimum 30 when on). Entries past the

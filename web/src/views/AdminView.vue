@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AuditLog from '../components/AuditLog.vue'
+import BackupRestore from '../components/BackupRestore.vue'
 import BackupScheduler from '../components/BackupScheduler.vue'
 import BundleManager from '../components/BundleManager.vue'
 import CatalogManager from '../components/CatalogManager.vue'
@@ -860,6 +861,10 @@ function formatTime(value) {
         {{ backingUp ? 'Preparing…' : 'Download database backup' }}
       </button>
     </div>
+
+    <!-- Last on the tab on purpose: the destructive control should not sit above
+         the ones people use every day. -->
+    <BackupRestore />
     </section>
 
     <section

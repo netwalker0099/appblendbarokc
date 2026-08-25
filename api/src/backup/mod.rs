@@ -42,6 +42,7 @@
 
 pub mod destination;
 pub mod drive;
+pub mod restore;
 pub mod schedule;
 
 use std::io::Write;
@@ -282,6 +283,61 @@ pub fn compress_and_encrypt(plain: &[u8], pass: SecretString) -> Result<Vec<u8>,
         .map_err(|e| BackupError::Internal(format!("encryption failed: {e}")))?;
 
     Ok(out)
+}
+
+/// The reverse of [`compress_and_encrypt`]: decrypt, then decompress.
+///
+/// Failing to decrypt is the load-bearing check on the restore path. Only
+/// someone holding the backup passphrase can produce a file that gets through
+/// here, which is what keeps "upload a file and we run it against the database"
+/// from being a way to execute arbitrary SQL with nothing but an admin session.
+pub fn decrypt_and_decompress(sealed: &[u8], pass: SecretString) -> Result<String, BackupError> {
+    use std::io::Read;
+
+    if !sealed.starts_with(b"age-encryption.org/v1") {
+        return Err(BackupError::BadArchive(
+            "this file is not age-encrypted — a Blend Bar backup begins with \
+             \"age-encryption.org/v1\". If you decrypted it by hand already, restore it \
+             with psql directly instead."
+                .into(),
+        ));
+    }
+
+    let decryptor = age::Decryptor::new(sealed)
+        .map_err(|e| BackupError::BadArchive(format!("could not read the encrypted file: {e}")))?;
+
+    if !decryptor.is_scrypt() {
+        return Err(BackupError::BadArchive(
+            "this file was encrypted to a key rather than a passphrase, so it did not come \
+             from this application"
+                .into(),
+        ));
+    }
+
+    let identity = age::scrypt::Identity::new(pass);
+    let mut reader = decryptor
+        .decrypt(std::iter::once(&identity as &dyn age::Identity))
+        .map_err(|_| {
+            BackupError::BadArchive(
+                "the backup passphrase does not decrypt this file. If it was taken before \
+                 the passphrase was last changed it needs the OLD one — decrypt it by hand \
+                 with `age -d` and restore with psql."
+                    .into(),
+            )
+        })?;
+
+    let mut gzipped = Vec::new();
+    reader
+        .read_to_end(&mut gzipped)
+        .map_err(|e| BackupError::BadArchive(format!("could not decrypt: {e}")))?;
+
+    let mut decoder = flate2::read::GzDecoder::new(&gzipped[..]);
+    let mut plain = String::new();
+    decoder
+        .read_to_string(&mut plain)
+        .map_err(|e| BackupError::BadArchive(format!("decrypted, but could not decompress: {e}")))?;
+
+    Ok(plain)
 }
 
 /// Dump, compress, encrypt. The whole artefact, ready to upload.
