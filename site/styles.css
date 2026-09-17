@@ -353,6 +353,17 @@ section {
   padding: 2rem 1.8rem;
 }
 
+/* The Cancellation Policy column was removed once its content moved into
+   Booking Terms. A lone column would otherwise sit in the left half of a
+   two-column grid with a hole beside it — so it spans the row, capped at a
+   readable measure rather than stretched to the full 1120px wrap. */
+.terms-col:only-child {
+  grid-column: 1 / -1;
+  max-width: 46rem;
+  margin: 0 auto;
+  width: 100%;
+}
+
 .terms-col h3 {
   font-size: 1.2rem;
   margin-bottom: 1rem;
