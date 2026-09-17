@@ -21,6 +21,9 @@ pub enum EventKind {
     /// A deposit settled. Per the published booking terms, that is the moment an
     /// event is actually booked.
     EventBooked,
+    /// Someone asked about an event from the public booking form. No money has
+    /// moved and nothing is committed — this is the first contact.
+    EventEnquiry,
 }
 
 impl EventKind {
@@ -28,6 +31,7 @@ impl EventKind {
         match self {
             EventKind::OnlineSale => "sale.online",
             EventKind::EventBooked => "event.booked",
+            EventKind::EventEnquiry => "event.enquiry",
         }
     }
 
@@ -35,7 +39,18 @@ impl EventKind {
         match s {
             "sale.online" => Some(EventKind::OnlineSale),
             "event.booked" => Some(EventKind::EventBooked),
+            "event.enquiry" => Some(EventKind::EventEnquiry),
             _ => None,
+        }
+    }
+
+    /// The per-target opt-in column that gates this event. Kept beside the wire
+    /// name so adding an event forces you to answer "what turns it off?".
+    pub fn target_column(&self) -> &'static str {
+        match self {
+            EventKind::OnlineSale => "notify_online_sale",
+            EventKind::EventBooked => "notify_event_booked",
+            EventKind::EventEnquiry => "notify_event_enquiry",
         }
     }
 
@@ -43,6 +58,16 @@ impl EventKind {
         match self {
             EventKind::OnlineSale => "New online order",
             EventKind::EventBooked => "Event booked — deposit paid",
+            EventKind::EventEnquiry => "New event enquiry",
+        }
+    }
+
+    /// What the body of the message actually is. A cart has items; an enquiry
+    /// has somebody's message, and calling that "Items" reads as a bug.
+    fn body_label(&self) -> &'static str {
+        match self {
+            EventKind::OnlineSale | EventKind::EventBooked => "Items",
+            EventKind::EventEnquiry => "Message",
         }
     }
 
@@ -52,6 +77,9 @@ impl EventKind {
             // exist yet and somebody has to make it.
             EventKind::OnlineSale => "This blend still needs to be made.",
             EventKind::EventBooked => "Confirm the date and add it to the calendar.",
+            // Nothing is booked yet and the person is waiting on a human. The
+            // contact details are in the app, not necessarily in this message.
+            EventKind::EventEnquiry => "Open Admin → Enquiries to reply.",
         }
     }
 }
@@ -60,20 +88,26 @@ impl EventKind {
 #[derive(Debug, Clone)]
 pub struct Message {
     pub kind: EventKind,
-    /// What was bought, one line per cart item.
+    /// What was bought, one line per cart item. For an enquiry, what they wrote.
     pub lines: Vec<String>,
-    pub total_cents: i64,
+    /// `None` for events where no money is involved. An enquiry showing "$0.00"
+    /// would read as a free order rather than as a question.
+    pub total_cents: Option<i64>,
     pub currency: String,
     pub customer_name: Option<String>,
     /// Only ever populated when the target opts in.
     pub customer_email: Option<String>,
-    /// Short cart reference, for looking the order up in the app.
+    /// Short reference, for looking the subject up in the app.
     pub reference: String,
+    /// Extra labelled facts, rendered in order after the items. Lets an enquiry
+    /// carry its event date without pretending to be a cart line.
+    pub facts: Vec<(String, String)>,
 }
 
 impl Message {
-    fn total(&self) -> String {
-        money::format_cents(self.total_cents, &self.currency)
+    fn total(&self) -> Option<String> {
+        self.total_cents
+            .map(|c| money::format_cents(c, &self.currency))
     }
 
     fn who(&self) -> String {
@@ -95,27 +129,49 @@ impl Message {
 
     /// Single-line summary, used as the notification preview on every platform.
     pub fn summary(&self) -> String {
-        format!("{} — {} — {}", self.kind.headline(), self.total(), self.who())
+        match self.total() {
+            Some(total) => format!("{} — {} — {}", self.kind.headline(), total, self.who()),
+            None => format!("{} — {}", self.kind.headline(), self.who()),
+        }
     }
 }
 
 /// `{"content": …, "embeds": [...]}` — Discord's incoming-webhook shape.
 pub fn discord(m: &Message) -> Value {
+    let mut fields = vec![json!({ "name": m.kind.body_label(), "value": m.items(), "inline": false })];
+    if let Some(total) = m.total() {
+        fields.push(json!({ "name": "Total", "value": total, "inline": true }));
+    }
+    fields.push(json!({ "name": "Customer", "value": m.who(), "inline": true }));
+    for (name, value) in &m.facts {
+        fields.push(json!({ "name": name, "value": value, "inline": true }));
+    }
+    fields.push(json!({ "name": "Reference", "value": m.reference, "inline": false }));
+
     json!({
         "username": "The Blend Bar",
         "embeds": [{
             "title": m.kind.headline(),
             "description": m.kind.call_to_action(),
             "color": BRAND_DECIMAL,
-            "fields": [
-                { "name": "Items", "value": m.items(), "inline": false },
-                { "name": "Total", "value": m.total(), "inline": true },
-                { "name": "Customer", "value": m.who(), "inline": true },
-                { "name": "Reference", "value": m.reference, "inline": false }
-            ],
+            "fields": fields,
             "footer": { "text": "The Blend Bar" }
         }]
     })
+}
+
+/// Slack renders these two-up. Total is omitted entirely when there is no money
+/// in the event, rather than shown as zero.
+fn summary_fields(m: &Message) -> Vec<Value> {
+    let mut fields = Vec::new();
+    if let Some(total) = m.total() {
+        fields.push(json!({ "type": "mrkdwn", "text": format!("*Total*\n{total}") }));
+    }
+    fields.push(json!({ "type": "mrkdwn", "text": format!("*Customer*\n{}", m.who()) }));
+    for (name, value) in &m.facts {
+        fields.push(json!({ "type": "mrkdwn", "text": format!("*{name}*\n{value}") }));
+    }
+    fields
 }
 
 /// `{"text": …, "blocks": [...]}` — Slack incoming webhook. `text` is required
@@ -131,14 +187,11 @@ pub fn slack(m: &Message) -> Value {
             },
             {
                 "type": "section",
-                "fields": [
-                    { "type": "mrkdwn", "text": format!("*Total*\n{}", m.total()) },
-                    { "type": "mrkdwn", "text": format!("*Customer*\n{}", m.who()) }
-                ]
+                "fields": summary_fields(m)
             },
             {
                 "type": "section",
-                "text": { "type": "mrkdwn", "text": format!("*Items*\n{}", m.items()) }
+                "text": { "type": "mrkdwn", "text": format!("*{}*\n{}", m.kind.body_label(), m.items()) }
             },
             {
                 "type": "context",
@@ -157,12 +210,15 @@ pub fn slack(m: &Message) -> Value {
 /// connector URLs; if a channel is migrated to a Workflow URL this payload will
 /// need to change shape.
 pub fn teams(m: &Message) -> Value {
-    let mut facts = vec![
-        json!({ "name": "Items", "value": m.items() }),
-        json!({ "name": "Total", "value": m.total() }),
-        json!({ "name": "Customer", "value": m.who() }),
-        json!({ "name": "Reference", "value": m.reference }),
-    ];
+    let mut facts = vec![json!({ "name": m.kind.body_label(), "value": m.items() })];
+    if let Some(total) = m.total() {
+        facts.push(json!({ "name": "Total", "value": total }));
+    }
+    facts.push(json!({ "name": "Customer", "value": m.who() }));
+    for (name, value) in &m.facts {
+        facts.push(json!({ "name": name, "value": value }));
+    }
+    facts.push(json!({ "name": "Reference", "value": m.reference }));
     facts.push(json!({ "name": "Next", "value": m.kind.call_to_action() }));
 
     json!({
@@ -194,11 +250,25 @@ mod tests {
         Message {
             kind: EventKind::OnlineSale,
             lines: vec!["Golden Hour (3.4 oz)".into()],
-            total_cents: 6000,
+            total_cents: Some(6000),
             currency: "USD".into(),
             customer_name: Some("Alex".into()),
             customer_email: None,
             reference: "cart 1a2b3c4d".into(),
+            facts: vec![],
+        }
+    }
+
+    fn enquiry() -> Message {
+        Message {
+            kind: EventKind::EventEnquiry,
+            lines: vec!["Bridal shower, 20 guests, downtown OKC.".into()],
+            total_cents: None,
+            currency: "USD".into(),
+            customer_name: Some("Ada Lovelace".into()),
+            customer_email: None,
+            reference: "enquiry 1a2b3c4d".into(),
+            facts: vec![("Event date".into(), "2027-03-14".into())],
         }
     }
 
@@ -272,7 +342,7 @@ mod tests {
     fn multiple_lines_are_all_present() {
         let mut m = msg();
         m.lines = vec!["Golden Hour (3.4 oz)".into(), "Event deposit (50%)".into()];
-        m.total_cents = 9998;
+        m.total_cents = Some(9998);
         let s = serde_json::to_string(&render("teams", &m).unwrap()).unwrap();
         assert!(s.contains("Golden Hour"));
         assert!(s.contains("Event deposit"));
@@ -280,8 +350,68 @@ mod tests {
     }
 
     #[test]
+    fn an_enquiry_never_shows_a_money_total() {
+        // "$0.00" on an enquiry reads as a free order. The field must be gone,
+        // not zero — on every platform.
+        for platform in ["discord", "slack", "teams"] {
+            let s = serde_json::to_string(&render(platform, &enquiry()).unwrap()).unwrap();
+            assert!(!s.contains("$0.00"), "{platform} rendered a zero total: {s}");
+            assert!(!s.contains("Total"), "{platform} kept the Total field: {s}");
+            assert!(s.contains("2027-03-14"), "{platform} lost the event date: {s}");
+            assert!(s.contains("Bridal shower"), "{platform} lost the details: {s}");
+        }
+    }
+
+    #[test]
+    fn an_enquiry_body_is_not_labelled_items() {
+        // It is the customer's message, not a cart.
+        for platform in ["discord", "slack", "teams"] {
+            let s = serde_json::to_string(&render(platform, &enquiry()).unwrap()).unwrap();
+            assert!(!s.contains("Items"), "{platform} called the message Items: {s}");
+            assert!(s.contains("Message"), "{platform} lost the label: {s}");
+        }
+        // A real order keeps the old wording.
+        let s = serde_json::to_string(&render("discord", &msg()).unwrap()).unwrap();
+        assert!(s.contains("Items"));
+    }
+
+    #[test]
+    fn an_enquiry_summary_still_says_who_and_what() {
+        let s = enquiry().summary();
+        assert!(s.contains("New event enquiry"), "{s}");
+        assert!(s.contains("Ada Lovelace"), "{s}");
+        // No stray separator where the money used to be.
+        assert!(!s.contains("—  —"), "{s}");
+    }
+
+    #[test]
+    fn an_enquiry_does_not_read_like_a_booking() {
+        // These two are one step apart in the real world and the whole value of
+        // the notification is knowing which one just happened.
+        let enq = serde_json::to_string(&discord(&enquiry())).unwrap();
+        let mut booked = enquiry();
+        booked.kind = EventKind::EventBooked;
+        booked.total_cents = Some(25000);
+        let booked = serde_json::to_string(&discord(&booked)).unwrap();
+        assert!(enq.contains("New event enquiry"));
+        assert!(!enq.contains("Event booked"));
+        assert!(booked.contains("Event booked"));
+    }
+
+    #[test]
+    fn enquiry_email_still_respects_the_opt_in() {
+        // Same rule as an order: a chat channel is a third party.
+        let s = serde_json::to_string(&render("slack", &enquiry()).unwrap()).unwrap();
+        assert!(!s.contains('@'), "email leaked: {s}");
+        let mut with = enquiry();
+        with.customer_email = Some("ada@example.com".into());
+        let s = serde_json::to_string(&render("slack", &with).unwrap()).unwrap();
+        assert!(s.contains("ada@example.com"));
+    }
+
+    #[test]
     fn wire_names_round_trip() {
-        for k in [EventKind::OnlineSale, EventKind::EventBooked] {
+        for k in [EventKind::OnlineSale, EventKind::EventBooked, EventKind::EventEnquiry] {
             assert_eq!(EventKind::from_wire(k.wire()), Some(k));
         }
         assert_eq!(EventKind::from_wire("sale.instore"), None);

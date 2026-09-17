@@ -122,6 +122,13 @@ export const api = {
     request(`/notifications/targets/${id}/test`, { method: 'POST' }),
   listNotificationDeliveries: () => request('/notifications/recent'),
 
+  // --- event booking enquiries (admin) ---
+  // Submitted by the public form at /book on the customer site; read and worked
+  // through here. `status` accepts 'all', 'open', or one exact status.
+  listEnquiries: (status = 'all') =>
+    request(`/enquiries?status=${encodeURIComponent(status)}`),
+  updateEnquiry: (id, patch) => request(`/enquiries/${id}`, { method: 'PATCH', body: patch }),
+
   // --- email (admin) ---
   // Relay host and credentials are server-side env only; these never carry them.
   getEmailState: () => request('/email/settings'),

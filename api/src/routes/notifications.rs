@@ -26,6 +26,7 @@ pub struct NotificationTarget {
     pub active: bool,
     pub notify_online_sale: bool,
     pub notify_event_booked: bool,
+    pub notify_event_enquiry: bool,
     pub include_customer_email: bool,
     pub created_at: DateTime<Utc>,
     pub last_success_at: Option<DateTime<Utc>>,
@@ -36,7 +37,8 @@ pub struct NotificationTarget {
 
 const SELECT_COLS: &str = r#"
     id, label, platform, active, notify_online_sale, notify_event_booked,
-    include_customer_email, created_at, last_success_at, last_error,
+    notify_event_enquiry, include_customer_email, created_at, last_success_at,
+    last_error,
     -- Host plus a short tail. Never the secret path segment.
     (split_part(split_part(webhook_url, '//', 2), '/', 1) || '/…' ||
      right(webhook_url, 4)) as url_hint
@@ -63,6 +65,8 @@ pub struct CreateTarget {
     pub notify_online_sale: bool,
     #[serde(default = "yes")]
     pub notify_event_booked: bool,
+    #[serde(default = "yes")]
+    pub notify_event_enquiry: bool,
     #[serde(default)]
     pub include_customer_email: bool,
 }
@@ -91,8 +95,8 @@ pub async fn create(
         r#"
         insert into notification_targets
             (label, platform, webhook_url, notify_online_sale, notify_event_booked,
-             include_customer_email, created_by)
-        values ($1, $2, $3, $4, $5, $6, $7)
+             notify_event_enquiry, include_customer_email, created_by)
+        values ($1, $2, $3, $4, $5, $6, $7, $8)
         returning {SELECT_COLS}
         "#
     ))
@@ -101,6 +105,7 @@ pub async fn create(
     .bind(body.webhook_url.trim())
     .bind(body.notify_online_sale)
     .bind(body.notify_event_booked)
+    .bind(body.notify_event_enquiry)
     .bind(body.include_customer_email)
     .bind(employee.id)
     .fetch_one(&state.db)
@@ -116,6 +121,7 @@ pub struct UpdateTarget {
     pub active: Option<bool>,
     pub notify_online_sale: Option<bool>,
     pub notify_event_booked: Option<bool>,
+    pub notify_event_enquiry: Option<bool>,
     pub include_customer_email: Option<bool>,
     /// Replaces the stored URL when present; omitted leaves it untouched.
     pub webhook_url: Option<String>,
@@ -144,8 +150,9 @@ pub async fn update(
             active = coalesce($3, active),
             notify_online_sale = coalesce($4, notify_online_sale),
             notify_event_booked = coalesce($5, notify_event_booked),
-            include_customer_email = coalesce($6, include_customer_email),
-            webhook_url = coalesce($7, webhook_url),
+            notify_event_enquiry = coalesce($6, notify_event_enquiry),
+            include_customer_email = coalesce($7, include_customer_email),
+            webhook_url = coalesce($8, webhook_url),
             updated_at = now()
         where id = $1
         returning {SELECT_COLS}
@@ -156,6 +163,7 @@ pub async fn update(
     .bind(body.active)
     .bind(body.notify_online_sale)
     .bind(body.notify_event_booked)
+    .bind(body.notify_event_enquiry)
     .bind(body.include_customer_email)
     .bind(body.webhook_url.as_deref().map(str::trim))
     .fetch_optional(&state.db)

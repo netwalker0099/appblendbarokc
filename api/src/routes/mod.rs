@@ -5,6 +5,7 @@ pub mod bundles;
 pub mod carts;
 pub mod deletions;
 pub mod email_admin;
+pub mod enquiries;
 pub mod customer_portal;
 pub mod customers;
 pub mod employees;
@@ -105,6 +106,11 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/notifications/targets/:id/test", post(notifications::test))
         .route("/api/notifications/recent", get(notifications::recent))
+        // Event booking enquiries from the public form. Reading one exposes a
+        // member of the public's name, email and phone, so these sit behind the
+        // same admin gate as the Admin view that renders them.
+        .route("/api/enquiries", get(enquiries::list))
+        .route("/api/enquiries/:id", patch(enquiries::update))
         .route("/api/sync/status", get(sync::status))
         .route("/api/sync/retry", post(sync::retry))
         .route("/api/admin/backup", get(admin::backup))
@@ -198,7 +204,15 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/public/scent/:id/qr", get(public::scent_qr))
         // Anonymous checkout from a share link. Rate-limited, server-priced, and
         // disabled unless Square is live — see the handler docs.
-        .route("/api/public/checkout", post(public::checkout));
+        .route("/api/public/checkout", post(public::checkout))
+        // The public booking form. Unauthenticated by necessity — a prospective
+        // customer has no account — so it is rate limited, fully validated
+        // server-side, and capped well below the default body limit: an event
+        // enquiry is a few hundred bytes and nothing legitimate approaches 16KB.
+        .route(
+            "/api/public/event-enquiry",
+            post(enquiries::submit).layer(DefaultBodyLimit::max(16 * 1024)),
+        );
 
     Router::new()
         .route("/api/health", get(crate::health))

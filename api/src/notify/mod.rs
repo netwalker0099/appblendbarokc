@@ -125,10 +125,7 @@ pub async fn enqueue_for_paid_cart(
     }
 
     for event in events {
-        let column = match event {
-            EventKind::OnlineSale => "notify_online_sale",
-            EventKind::EventBooked => "notify_event_booked",
-        };
+        let column = event.target_column();
         sqlx::query(&format!(
             r#"
             insert into notification_deliveries (target_id, event_type, cart_id)
@@ -146,13 +143,46 @@ pub async fn enqueue_for_paid_cart(
     Ok(())
 }
 
+/// Queue notifications for an event enquiry that has just been submitted.
+///
+/// Takes the connection so it can run inside the same transaction as the insert:
+/// a notification must never be queued for an enquiry that then rolls back, and
+/// an enquiry must never be stored without the team being told. Conflicts are
+/// ignored for the same reason as the cart path — queueing twice for one subject
+/// would double-ping the channel.
+pub async fn enqueue_for_enquiry(
+    conn: &mut sqlx::PgConnection,
+    enquiry_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let column = EventKind::EventEnquiry.target_column();
+    sqlx::query(&format!(
+        r#"
+        insert into notification_deliveries (target_id, event_type, enquiry_id)
+        select id, $1, $2 from notification_targets
+        where active = true and {column} = true
+        on conflict (target_id, enquiry_id, event_type) where enquiry_id is not null
+        do nothing
+        "#
+    ))
+    .bind(EventKind::EventEnquiry.wire())
+    .bind(enquiry_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
 /// One row of work, joined with everything needed to send it.
+///
+/// `cart_id` and `enquiry_id` are one-of — the database enforces that exactly
+/// one is set (see migration 0021), so the pair is really a tagged union that
+/// sqlx cannot express directly.
 #[derive(sqlx::FromRow)]
 struct DueDelivery {
     id: Uuid,
     attempts: i32,
     event_type: String,
-    cart_id: Uuid,
+    cart_id: Option<Uuid>,
+    enquiry_id: Option<Uuid>,
     platform: String,
     webhook_url: String,
     include_customer_email: bool,
@@ -163,7 +193,7 @@ struct DueDelivery {
 pub async fn drain(db: &PgPool, client: &reqwest::Client) -> Result<(), sqlx::Error> {
     let due = sqlx::query_as::<_, DueDelivery>(
         r#"
-        select d.id, d.attempts, d.event_type, d.cart_id, d.target_id,
+        select d.id, d.attempts, d.event_type, d.cart_id, d.enquiry_id, d.target_id,
                t.platform, t.webhook_url, t.include_customer_email
         from notification_deliveries d
         join notification_targets t on t.id = d.target_id
@@ -191,9 +221,16 @@ async fn deliver(
     let kind = EventKind::from_wire(&job.event_type)
         .ok_or_else(|| (format!("unknown event type '{}'", job.event_type), false))?;
 
-    let message = build_message(db, job.cart_id, kind, job.include_customer_email)
-        .await
-        .map_err(|e| (e, false))?;
+    let message = match (job.cart_id, job.enquiry_id) {
+        (Some(cart_id), None) => build_cart_message(db, cart_id, kind, job.include_customer_email).await,
+        (None, Some(enquiry_id)) => {
+            build_enquiry_message(db, enquiry_id, kind, job.include_customer_email).await
+        }
+        // The check constraint makes this unreachable; treat it as permanent
+        // rather than retrying a row that can never become deliverable.
+        _ => Err(format!("delivery {} has no single subject", job.id)),
+    }
+    .map_err(|e| (e, false))?;
 
     let payload = format::render(&job.platform, &message).ok_or_else(|| {
         (
@@ -205,8 +242,8 @@ async fn deliver(
     post(client, &job.webhook_url, &payload).await
 }
 
-/// Assemble the message from live data.
-async fn build_message(
+/// Assemble a cart message from live data.
+async fn build_cart_message(
     db: &PgPool,
     cart_id: Uuid,
     kind: EventKind,
@@ -250,11 +287,65 @@ async fn build_message(
     Ok(Message {
         kind,
         lines,
-        total_cents,
+        total_cents: Some(total_cents),
         currency,
         customer_name: name,
         customer_email: if include_email { Some(email) } else { None },
         reference: format!("cart {}", &cart_id.simple().to_string()[..8]),
+        facts: vec![],
+    })
+}
+
+/// Assemble an enquiry message from live data.
+///
+/// Contact details are governed by the target's `include_customer_email` opt-in,
+/// exactly as an order's are. The reasoning is the same and applies with more
+/// force here: an enquiry is a private message from someone who has bought
+/// nothing yet, and a chat channel is a third party with its own retention. The
+/// team always has the full record in Admin → Enquiries; the phone number rides
+/// along with the email toggle rather than getting a second switch nobody would
+/// find.
+async fn build_enquiry_message(
+    db: &PgPool,
+    enquiry_id: Uuid,
+    kind: EventKind,
+    include_contact: bool,
+) -> Result<Message, String> {
+    let row: Option<(String, String, String, String, chrono::NaiveDate, String)> = sqlx::query_as(
+        "select first_name, last_name, email, phone, event_date, details \
+         from event_enquiries where id = $1",
+    )
+    .bind(enquiry_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let (first_name, last_name, email, phone, event_date, details) =
+        row.ok_or_else(|| format!("enquiry {enquiry_id} no longer exists"))?;
+
+    let mut facts = vec![("Event date".to_string(), event_date.to_string())];
+    if include_contact {
+        facts.push(("Phone".to_string(), phone));
+    }
+
+    // Chat platforms truncate long fields unpredictably; cut it here so the cut
+    // is ours and is marked.
+    let details = if details.chars().count() > 600 {
+        let head: String = details.chars().take(600).collect();
+        format!("{head}… (full text in the app)")
+    } else {
+        details
+    };
+
+    Ok(Message {
+        kind,
+        lines: vec![details],
+        total_cents: None,
+        currency: money::DEFAULT_CURRENCY.into(),
+        customer_name: Some(format!("{first_name} {last_name}")),
+        customer_email: if include_contact { Some(email) } else { None },
+        reference: format!("enquiry {}", &enquiry_id.simple().to_string()[..8]),
+        facts,
     })
 }
 
@@ -353,11 +444,12 @@ pub async fn send_test(
     let message = Message {
         kind: EventKind::OnlineSale,
         lines: vec!["Test message — no order was placed".into()],
-        total_cents: 0,
+        total_cents: Some(0),
         currency: money::DEFAULT_CURRENCY.into(),
         customer_name: Some("The Blend Bar".into()),
         customer_email: None,
         reference: "connection test".into(),
+        facts: vec![],
     };
     let payload = format::render(platform, &message)
         .ok_or_else(|| format!("unknown platform '{platform}'"))?;

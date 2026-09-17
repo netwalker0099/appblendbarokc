@@ -42,6 +42,9 @@ pub struct AppState {
     /// Guards the one unauthenticated endpoint that writes rows and calls Square
     /// (the share-page checkout).
     pub public_checkout_limiter: Arc<ratelimit::RateLimiter>,
+    /// Guards the public event-enquiry form, which writes a row and queues a
+    /// chat notification.
+    pub enquiry_limiter: Arc<ratelimit::RateLimiter>,
     /// Outbound email. Swappable at runtime so an admin can connect Google from
     /// the browser without a restart; read through [`AppState::mailer`].
     pub mailer: Arc<std::sync::RwLock<Arc<dyn Mailer>>>,
@@ -191,6 +194,14 @@ async fn main() {
         public_checkout_limiter: Arc::new(ratelimit::RateLimiter::new(
             10,
             std::time::Duration::from_secs(300),
+        )),
+        // Five enquiries per IP per fifteen minutes. Booking an event is a
+        // once-in-a-while act, so this is generous for a person who mistypes an
+        // email and resubmits, and tight enough that nobody can flood the team's
+        // chat channel — the failure that would get notifications turned off.
+        enquiry_limiter: Arc::new(ratelimit::RateLimiter::new(
+            5,
+            std::time::Duration::from_secs(900),
         )),
         mailer: Arc::new(std::sync::RwLock::new(email::from_env())),
     };

@@ -1,5 +1,6 @@
 pub mod cart;
 pub mod customer;
+pub mod enquiry;
 pub mod employee;
 pub mod ingredient;
 pub mod mix;

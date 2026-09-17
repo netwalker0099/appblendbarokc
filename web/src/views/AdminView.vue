@@ -8,6 +8,7 @@ import BackupScheduler from '../components/BackupScheduler.vue'
 import BundleManager from '../components/BundleManager.vue'
 import CatalogManager from '../components/CatalogManager.vue'
 import EmailManager from '../components/EmailManager.vue'
+import EventEnquiries from '../components/EventEnquiries.vue'
 import NotificationManager from '../components/NotificationManager.vue'
 import ScentManager from '../components/ScentManager.vue'
 import TeamManager from '../components/TeamManager.vue'
@@ -33,6 +34,7 @@ const TABS = [
   { id: 'team', label: 'Team' },
   { id: 'billing', label: 'Billing' },
   { id: 'alerts', label: 'Notifications' },
+  { id: 'enquiries', label: 'Enquiries' },
   { id: 'email', label: 'Email' },
   { id: 'data', label: 'Data' },
   { id: 'activity', label: 'Activity' },
@@ -81,11 +83,18 @@ const tabAlert = computed(() => ({
   // "No off-box backup exists" is the quietest serious problem in the whole
   // system — nothing breaks until the day everything has already been lost —
   // so it gets the same dot as a dead payment terminal.
+  // Someone asked about an event and is waiting on a reply. This is the only
+  // dot that means "a person is waiting", so it stays on until the list is
+  // worked down rather than until something is configured.
+  enquiries: openEnquiries.value > 0,
   data:
     Boolean(backupStatus.value && !backupStatus.value.passphrase_set) ||
     Boolean(backupStatus.value && !backupStatus.value.last_success_at) ||
     backupDestinations.value.some((d) => d.enabled && d.last_status === 'failed'),
 }))
+
+/** Open enquiries, reported up by the Enquiries panel to drive its tab dot. */
+const openEnquiries = ref(0)
 
 const ingredients = ref([])
 const scents = ref([])
@@ -824,6 +833,15 @@ function formatTime(value) {
       v-show="activeTab === 'alerts'"
     >
       <NotificationManager :targets="notificationTargets" @changed="reloadNotifications" />
+    </section>
+
+    <section
+      id="panel-enquiries"
+      role="tabpanel"
+      aria-labelledby="tab-enquiries"
+      v-show="activeTab === 'enquiries'"
+    >
+      <EventEnquiries @changed="(n) => (openEnquiries = n)" />
     </section>
 
     <section

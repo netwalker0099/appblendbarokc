@@ -27,6 +27,7 @@ const draft = reactive({
   webhook_url: '',
   notify_online_sale: true,
   notify_event_booked: true,
+  notify_event_enquiry: true,
   include_customer_email: false,
 })
 
@@ -111,9 +112,10 @@ function formatTime(value) {
     <h2>Chat notifications</h2>
     <p class="muted">
       Posts to Discord, Slack or Teams when <strong>a customer</strong> does
-      something — an online order from a shared scent link, or an event deposit
-      being paid. Sales you ring up at the bar do not post: you already know about
-      those, and a noisy channel stops being read.
+      something — an online order from a shared scent link, an event deposit being
+      paid, or an event enquiry from the booking form. Sales you ring up at the
+      bar do not post: you already know about those, and a noisy channel stops
+      being read.
     </p>
 
     <p class="error" v-if="error">{{ error }}</p>
@@ -129,6 +131,7 @@ function formatTime(value) {
         <span class="muted">
           Online sales: <strong>{{ t.notify_online_sale ? 'on' : 'off' }}</strong> ·
           Event deposits: <strong>{{ t.notify_event_booked ? 'on' : 'off' }}</strong> ·
+          Event enquiries: <strong>{{ t.notify_event_enquiry ? 'on' : 'off' }}</strong> ·
           Customer email: <strong>{{ t.include_customer_email ? 'included' : 'hidden' }}</strong>
         </span>
         <span class="muted" v-if="t.last_success_at">
@@ -148,6 +151,14 @@ function formatTime(value) {
       </button>
       <button class="ghost" type="button" :disabled="busy === t.id" @click="toggle(t, 'active')">
         {{ t.active ? 'Pause' : 'Resume' }}
+      </button>
+      <button
+        class="ghost"
+        type="button"
+        :disabled="busy === t.id"
+        @click="toggle(t, 'notify_event_enquiry')"
+      >
+        {{ t.notify_event_enquiry ? 'Mute enquiries' : 'Unmute enquiries' }}
       </button>
       <button
         class="ghost"
@@ -205,8 +216,12 @@ function formatTime(value) {
         <span>Event deposits paid</span>
       </label>
       <label class="check">
+        <input type="checkbox" v-model="draft.notify_event_enquiry" />
+        <span>Event enquiries</span>
+      </label>
+      <label class="check">
         <input type="checkbox" v-model="draft.include_customer_email" />
-        <span>Include customer email</span>
+        <span>Include customer contact details</span>
       </label>
     </div>
     <p class="muted" style="margin: 0.4rem 0 0; font-size: 0.85rem">
