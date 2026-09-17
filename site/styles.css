@@ -787,6 +787,130 @@ section {
   cursor: progress;
 }
 
+/* --- Event booking form (/book) --- */
+.book-wrap {
+  max-width: 680px;
+}
+
+.book-form {
+  margin-top: 1.8rem;
+}
+
+/* Given and family name sit on one line on a desktop; the breakpoint below
+   stacks them, because two half-width fields on a phone are unusable. */
+.book-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+
+.book-form textarea {
+  width: 100%;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  /* 16px minimum, or iOS Safari zooms the page when the field is focused. */
+  font-size: 1rem;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.book-form textarea:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+  border-color: var(--gold);
+}
+
+.field-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* Honeypot: off-screen rather than display:none, which the less naive bots
+   know to skip. Never focusable, never announced. */
+.book-hp {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.book-captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.book-captcha-q {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+
+.book-captcha-row input {
+  width: 5.5rem;
+  flex: 0 0 auto;
+}
+
+.book-captcha-new {
+  padding: 0.5rem 0.9rem;
+  font-size: 0.7rem;
+}
+
+/* `hidden` alone does not hide this form: .buy-form sets `display: flex`, and a
+   class beats the UA stylesheet's [hidden] rule, so the fields stayed on screen
+   underneath the result panel. */
+.book-form[hidden] {
+  display: none;
+}
+
+.book-panel {
+  text-align: left;
+  /* .portal-card caps at 480px for the sign-in box; here the panel replaces the
+     form in place and should match its width. */
+  max-width: none;
+  padding: 2.4rem 2rem;
+}
+
+.book-panel h2 {
+  font-size: clamp(1.5rem, 3.5vw, 2rem);
+  margin: 0.3rem 0 0.8rem;
+}
+
+.book-panel .btn {
+  margin-top: 0.4rem;
+}
+
+.book-recap {
+  margin: 1.6rem 0 1.2rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.5rem 1.2rem;
+  font-size: 0.92rem;
+}
+
+.book-recap dt {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.75rem;
+  padding-top: 0.15rem;
+}
+
+.book-recap dd {
+  margin: 0;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
 .error-text {
   margin: 0;
   color: #b4462f;
@@ -818,6 +942,16 @@ section {
   .access .cards,
   .terms {
     grid-template-columns: 1fr;
+  }
+  .book-row {
+    grid-template-columns: 1fr;
+  }
+  .book-recap {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+  .book-recap dd {
+    margin-bottom: 0.7rem;
   }
   .nav .links {
     display: none;
