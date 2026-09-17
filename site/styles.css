@@ -274,6 +274,30 @@ section {
   background: var(--sand);
 }
 
+/* --- About --- */
+.about-copy {
+  max-width: 46rem;
+  margin: 0 auto;
+}
+
+.about-copy p {
+  margin: 0 0 1.4rem;
+  color: var(--muted);
+}
+
+.about-copy p:last-child {
+  margin-bottom: 0;
+}
+
+.about-copy .about-tagline {
+  margin-top: clamp(1.8rem, 3vw, 2.4rem);
+  text-align: center;
+  font-family: var(--display);
+  font-size: clamp(1.15rem, 2vw, 1.4rem);
+  letter-spacing: 0.08em;
+  color: var(--gold-deep);
+}
+
 /* --- Experience cards --- */
 .cards {
   display: grid;
