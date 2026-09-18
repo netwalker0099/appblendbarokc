@@ -1,14 +1,26 @@
 # Blend Bar — Resume Notes
 
-Last updated: 2026-07-27 — **billing migrated from Squarespace to Square**
-(Milestones 9 and 10 below): carts → Square hosted checkout → webhook →
-reconciliation, plus the public buy button on share pages.
-Built and tested against the mock; no real Square credentials on this box yet, so
-nothing has been verified against the live service. Booking/cancellation terms also
-added to the sandbox site's events section.
+Last updated: 2026-09-17 — **the booking funnel exists end to end** (Milestone 14
+below). The customer site got an About Us section and a copy pass; the events
+section now leads to a real booking form at `/book` instead of an Instagram DM;
+and `POST /api/public/event-enquiry` stores the enquiry, shows it in
+Admin → Enquiries, and announces it to Discord. **This is the first integration
+on this box wired to a real third-party service and confirmed working in
+production** — everything before it (Square, email, backups) is still built but
+unconfigured.
 
-Previously: 2026-07-24 — DB wiped clean for real-data entry (all 7 milestones plus
-ingredient types & scent formulas done; see history below).
+Previously: 2026-08-24/25 — backups, audit log, retention and restore. Those four
+are written up **inside the "Security posture" section** further down rather than
+under their own headings, which is where people miss them. 2026-07-27 — billing
+migrated from Squarespace to Square (Milestones 9 and 10); built against the mock,
+never verified against the live service. 2026-07-24 — DB wiped clean for real-data
+entry.
+
+**Not written up anywhere:** the referrals/coupons work of 2026-07-28 (commit
+`652382f`). The reasoning only exists in that commit message, and it is subtle —
+the reward is issued on settlement rather than checkout, one reward per
+(referrer, referred) pair, discounts clamped to the order total. Worth a section
+of its own before someone re-derives it.
 
 Read this first in a new session, then README.md for deploy mechanics.
 
@@ -27,7 +39,12 @@ This repo lives directly on the target VPS at `/opt/app` (hostname `app`, Ubuntu
 26.04). Docker, the Compose stack, and all validation in Milestones 1–3 have been
 run for real on this box, not in a separate sandbox.
 
-## Status: Milestones 1–7 done and validated live on this VPS
+## Status: Milestones 1–14 done; see the header for what is and isn't connected
+
+(The section below was written when there were seven and describes those. Later
+milestones have their own sections further down.)
+
+### Milestones 1–7 — done and validated live on this VPS
 
 (Milestones 5 and 6 — Squarespace push sync and the inbound webhook receiver — are
 built and validated **against the mock**; their live Squarespace HTTP paths are
@@ -700,7 +717,139 @@ Google credentials** — no service account exists yet.
 
 **Still open:** remove `PORTAL_BYPASS_EMAIL` once a transport is live.
 
+## Milestone 14: the booking funnel (2026-09-17)
+
+Before today an event enquiry could not enter this system. The site's events
+section linked to Instagram DMs, the app captured nothing, and `event.booked`
+fired at deposit payment because that was the first moment anything was known
+about the event at all. That gap is now closed: form → database → admin view →
+chat notification.
+
+### Customer site copy + an About Us section
+
+`site/index.html`, `site/styles.css`. An **About Us** section sits between the
+hero and the Experience band (owner-supplied copy), plus a copy pass across the
+page: the hero's second button is "Shop Blend N°1" (and the footer link matches),
+the Experience heading names the scent, the Discover card says "library of
+fragrances" and "an expert blender", the signature product no longer prints a
+price, and the events subtitle was rewritten.
+
+- The About body does **not** use `.section-head`, which caps at 40rem and
+  centres — right for a one-line subtitle, wrong for two paragraphs. It uses
+  `.about-copy`, 46rem, left-aligned.
+- The **price was removed deliberately**: the section links out to
+  theblendbarokc.com to buy, and a figure hard-coded here would be a second
+  source of truth to keep in sync.
+- Booking terms: the deposit is no longer a fixed 50% and is described as
+  negotiable. **Two clauses went and did not come back** — "deposits are
+  non-refundable" and "without a deposit, your event is not booked". The second
+  was the stated justification for firing `event.booked` at settlement; the
+  behaviour is unchanged but now rests on "reserve and secure your event date".
+- The Cancellation Policy column was folded into Booking Terms as a fourth
+  bullet, because it had become the same policy published twice. `.terms` is a
+  two-column grid, so `.terms-col:only-child` spans the row at a 46rem measure.
+
+**Known, still live:** the About `<h2>` reads "The Blend Bar Experience" and the
+eyebrow of the very next section reads the same words, ~300px apart. That is the
+copy as supplied. The cheaper fix, if wanted, is the Experience eyebrow — it is
+decorative.
+
+### The booking form (`site/book.html`, `site/book.js`)
+
+Replaces the Instagram CTA. Caddy's existing `try_files` serves it at the
+extensionless `/book`; no Caddyfile change was needed.
+
+- **The captcha is client-side and cannot currently be anything else.** The CSP
+  pins `script-src` and `connect-src` to `'self'`, so reCAPTCHA, hCaptcha and
+  Turnstile are all out without widening it. What exists is a worded arithmetic
+  question, a honeypot field, and a 3-second floor on fill time — **anything
+  POSTing to the endpoint directly walks past all three.** Said at the top of
+  `book.js` so nobody mistakes it for a boundary. The real limits are in the
+  handler.
+- Worded arithmetic rather than distorted characters because this form is now
+  the only booking channel on the site, and an unreadable image with no audio
+  alternative would cost real bookings.
+- **The failure branch was the one that mattered**, because for the hours
+  between shipping the form and shipping the endpoint every submission took it.
+  It states plainly that the request did not arrive, offers the Instagram link,
+  and prints the person's own answers back so a refresh cannot destroy them —
+  following the precedent already set in `share.js` ("never leave a buyer at a
+  dead end").
+
+### `POST /api/public/event-enquiry` + Admin → Enquiries
+
+Migration `0021`, `api/src/routes/enquiries.rs`, `api/src/models/enquiry.rs`,
+`web/src/components/EventEnquiries.vue`.
+
+- `event_enquiries` is the record of record: name, email, phone, event date,
+  message, a four-state workflow (`new`/`contacted`/`booked`/`declined`), an
+  internal note, and who last moved it. `handled_by`/`handled_at` are stamped on
+  a **status change only** — editing a note is not taking ownership.
+- **The notification table only knew about carts.** `notification_deliveries`
+  had `cart_id not null` and dedup on `(target, cart, event)`. An enquiry has no
+  cart and never will. The subject is now one-of, enforced by
+  `num_nonnulls(cart_id, enquiry_id) = 1`.
+- **The part worth reading twice:** `unique (target_id, cart_id, event_type)`
+  stops guarding anything the moment `cart_id` is nullable, because in Postgres
+  every NULL is distinct from every other. Leaving it would have silently
+  removed the double-ping protection *for carts too* — a change that reads as a
+  no-op in review. Two partial unique indexes restore it per subject.
+- `Message.total_cents` became `Option<i64>`. An enquiry rendering "$0.00" reads
+  as a free order rather than a question, so the Total field is omitted on all
+  three platforms. The body label is per-event as well: a cart has Items, an
+  enquiry has a Message. A `facts` list carries the event date and phone without
+  pretending to be cart lines.
+- **Contact details follow the `include_customer_email` opt-in** that already
+  existed, phone included rather than getting a second switch nobody would find.
+- The public endpoint is rate limited (5/IP/15min, reusing the share-page
+  checkout's limiter), capped at 16KB, and fully validated server-side.
+  **Rejected attempts count toward the limit** — the check runs before
+  validation, so garbage is not free. The insert and the notification queue
+  share one transaction.
+- The routes require **admin**, matching the `meta: { admin: true }` gate on the
+  Admin view that renders them. Drop to employee-level if front-of-house should
+  be answering enquiries.
+
+**Verified:** 134 unit tests (12 new). 28 HTTP checks and 25 admin-route checks
+(through a real MFA-complete session, including confirming the PATCH lands in
+the audit log) — all against a **scratch copy** of production, never production.
+The payload was read back from a mock receiver rather than inferred from a 404.
+The admin panel was rendered in a browser against a stub API: zero console
+errors. Then live: the migration applied to production, and one enquiry was
+submitted through the real form in a real browser, confirmed stored, deleted.
+
+### Discord is live — the first real integration on this box
+
+A target (`#robert-projects`, discord.com) is **configured, active, and
+delivering**: real enquiries were pushed through it and came back `sent` on the
+first attempt. `include_customer_email` is **on** for it, so messages carry the
+email and phone. Note that flag is per-channel, not per-event — online sales and
+deposits will now carry the customer email too.
+
+That toggle was flipped with a direct SQL `update`, so **it is not in the audit
+log**. Toggling it off and on from Admin → Notifications would record it
+properly.
+
+### Deploy mechanics worth knowing
+
+`docker compose up --build -d caddy` does the build and the container swap in one
+command, and a timeout landing between them leaves a **new image built but the
+old container still serving** — which looks exactly like "the deploy did
+nothing". Run `docker compose build caddy` and `docker compose up -d caddy` as
+two steps instead. The site is baked into the image (`COPY site
+/usr/share/blendbar-site`), so every copy edit costs a full rebuild; a bind mount
+for `site/` would make them instant.
+
+**Loose end:** `/opt/blendbar-premigrate-0021-20260917-221447.sql` is a plaintext
+pre-migration dump of the whole database, `chmod 600`. It is unencrypted PII
+sitting on the box — delete it once 0021 is trusted. (A world-readable plaintext
+backup was a "fix now" finding in the 2026-07-24 review; this one was locked down
+immediately, but it should not live here.)
+
 ## Not started
+
+Nothing is queued as unstarted *build* work. What remains is configuration, not
+code — see "Open items nobody has answered yet" at the bottom of this file.
 
 ## Security posture (reviewed 2026-07-24)
 
@@ -974,30 +1123,57 @@ prerequisites. Treat any customer-facing work as needing its own security pass.
 
 ## Open items nobody has answered yet
 
-- **Squarespace API key still not obtained.** `SQUARESPACE_API_KEY` in `.env` is
-  blank, so the app runs the sync mock. Once set + `docker compose up -d`, the
-  live `HttpSquarespace` path takes over — but its request shapes are unverified
-  (see the M5 entry) and there are stale `mock_*` ids already written on existing
-  rows that a real sync won't overwrite for orders (contacts re-upsert fine).
-- **Webhook signing secret is a dev placeholder.** `SQUARESPACE_WEBHOOK_SECRET`
-  in `.env` is `dev_webhook_secret_change_me` so the receiver is enabled for
-  testing. Replace with the real subscription secret before going live, and
-  register the subscription on the Squarespace side.
-- The `mock_*` external ids concern is now moot — the DB was wiped clean on
-  2026-07-24 (see "What's actually running" above), so there are no stale synced
-  rows left. The catalogs are empty and ready for real data.
+Checked against `.env` on 2026-09-17.
+
+- **Square is not connected.** `SQUARE_ACCESS_TOKEN`, `SQUARE_LOCATION_ID`,
+  `SQUARE_REDIRECT_URL` and `SQUARE_WEBHOOK_SIGNATURE_KEY` are all blank, so the
+  app runs the Square mock. **No payment can be taken until these are set.** The
+  billing code was built and tested against the mock in M9/M10 and has never
+  touched the live service.
+- **Email is not connected.** `GOOGLE_SA_KEY_FILE`, `GOOGLE_IMPERSONATE` and
+  `SMTP_HOST` are blank and no service account exists, so portal sign-in links
+  are logged rather than sent and the customer portal is effectively closed.
+  `PORTAL_BYPASS_EMAIL` should be removed once a transport is live.
+- **Scheduled backups cannot deliver.** No passphrase is set and no destination
+  can reach anywhere, so despite the machinery the only real backup is still a
+  manual pull. Audit archiving is blocked by the same gap — it refuses to prune
+  with no deliverable destination, which is the safe failure.
+- **No rate limiting at the edge, no admin RBAC.** Cloudflare is the chosen
+  direction and is not configured. Any admin-role employee reaches every admin
+  route; sessions do not rotate.
+- `/opt/blendbar-premigrate-0021-20260917-221447.sql` — plaintext PII dump on
+  disk, `chmod 600`. Delete once migration 0021 is trusted.
+
+**Superseded, kept so nobody re-derives it:** earlier versions of this section
+listed `SQUARESPACE_API_KEY` and `SQUARESPACE_WEBHOOK_SECRET` as the blockers.
+Those variables no longer exist anywhere in `.env` or `.env.example` — billing
+moved to Square in Milestone 9 (2026-07-27) and Squarespace is gone.
 
 ## How to pick this back up
 
-1. `cd /opt/app && git status` — see whether anything's changed since this was
+1. `git status` — see whether anything's changed since this was
    written; commit first if not already done.
-2. `docker compose ps` — confirm the stack is still healthy.
-3. Skim this file and `README.md`. All seven milestones are done; the remaining
-   work is going live (see "Not started" above): get the Squarespace API key +
-   real webhook secret, swap them in, and verify the two untested live HTTP paths
-   (`HttpSquarespace` push/`get_order` and the webhook signature wire format).
+2. `docker compose ps` — confirm all three services are healthy.
+3. Skim this file, then `README.md` for deploy mechanics.
 
-Note: the instance was wiped clean on 2026-07-24 for real-data entry — empty
-ingredient/scent catalogs, no customers/orders. Add the real ingredient catalog
-(with Base/Top Note/Heart Note types) and scents via `/admin` first. Pre-wipe
-backup at `/opt/blendbar-preclear-backup-20260724-142713.sql` if needed.
+**Everything is built. Almost nothing is connected.** Fourteen milestones of
+functionality sit behind four blank credentials. The single highest-value next
+step is whichever of these matters most to the business:
+
+- **Square** — no money can be taken at all until it is connected. This is the
+  one that stops the business operating.
+- **Backups** — set a passphrase and a destination in Admin → Data. The quietest
+  serious risk on the box: nothing breaks until the day everything is gone.
+- **Email** — a service account, then the customer portal actually works.
+
+Event enquiries are the exception and now work end to end, including live
+Discord delivery — see Milestone 14.
+
+**Deploying:** run `docker compose build <svc>` and `docker compose up -d <svc>`
+as **two commands**. The combined `up --build` can leave a new image built and
+the old container still serving if it is interrupted between the two.
+
+Note: the instance was wiped clean on 2026-07-24 for real-data entry. The
+ingredient catalog has since been populated (18 ingredients as of 2026-09-17);
+customers and orders are still empty. Pre-wipe backup at
+`/opt/blendbar-preclear-backup-20260724-142713.sql` if ever needed.
