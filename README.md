@@ -174,9 +174,12 @@ anonymous caller can set money in motion, so it is deliberately narrow:
   `marketing_consent = false` — a purchase is not consent.
 - **Rate limited** to 10 attempts per IP per 5 minutes, keyed on the *rightmost*
   `X-Forwarded-For` entry (the one Caddy wrote; the leftmost is client-forgeable).
-- **Refused with 503 when Square is not live.** A staff member seeing a mock link
-  is an inconvenience; sending a paying customer to a dead URL is not, so the
-  endpoint refuses rather than hand back a fake checkout. The share page then
+- **Refused with 503 unless Square is in production** (`SQUARE_ENV=production`).
+  On the mock or on **sandbox** it refuses: a mock link is a dead URL, and a
+  sandbox link takes a "payment" that moves no money, so neither may be handed
+  to a real customer. Staff checkout still works against sandbox — that is how
+  billing gets tested. It switches on by itself at go-live; there is no
+  separate flag to remember. The share page then
   shows a "message us to order" fallback instead of a broken button.
 - Square's error text is never returned to an anonymous caller — it can carry
   account and configuration detail.
@@ -421,21 +424,29 @@ payment links, charges nobody, and says so in red on both the checkout screen an
 admin panel. The mock still exercises the full path (checkout → payment →
 reconciliation), which is how the logic is tested without credentials.
 
-⚠️ The live HTTP client in `api/src/square/http.rs` follows Square's documented
-Connect v2 API but **has never made a real request from this box**. Work through this
-before taking real money:
+The live HTTP client in `api/src/square/http.rs` has been exercised against **Square
+Sandbox** (2026-10-01, steps 1–3 below) but has **not yet taken a production
+payment**. Work through this before taking real money — ✅ marks what is done:
 
-1. In the Square developer dashboard, create an application. Take the **Sandbox**
-   access token and a sandbox **location id** (`GET /v2/locations`).
-2. Set `SQUARE_ENV=sandbox`, `SQUARE_ACCESS_TOKEN`, `SQUARE_LOCATION_ID` in `.env`,
-   then `docker compose up -d --build api`. Admin → Square billing should read
+1. ✅ In the Square developer dashboard, create an application. Take the **Sandbox**
+   access token and a sandbox **location id** (`GET /v2/locations`). The
+   application id is **not** needed — hosted checkout uses the server-side token only.
+2. ✅ Set `SQUARE_ENV=sandbox`, `SQUARE_ACCESS_TOKEN`, `SQUARE_LOCATION_ID` in `.env`,
+   then `docker compose up -d --build api`. The startup log should read
+   `square: live HTTP client env="sandbox"` and Admin → Square billing
    "Live — square-sandbox".
-3. Take a full test payment with a [Square test card][sq-test] end to end: build a
-   cart, scan the QR, pay, and confirm the cart flips to paid on its own.
-4. Create the webhook subscription (`payment.updated`, `refund.updated`) pointing at
-   `https://<your-domain>/api/webhooks/square`. Put Square's signature key in
-   `SQUARE_WEBHOOK_SIGNATURE_KEY` and the identical URL in `SQUARE_WEBHOOK_URL`.
-   Restart, then confirm events land in Admin → Recent Square events.
+3. ✅ Take a full test payment with a [Square test card][sq-test] end to end: build a
+   cart, scan the QR, pay, and confirm the cart flips to paid. *Done 2026-10-01: a
+   $1.00 cart matched Square on order, line, amount, payment id and location. It was
+   settled with "Check Square" because webhooks were not yet on — re-test after step 4
+   to see it flip **on its own**.*
+4. Create the webhook subscription pointing at
+   `https://<your-domain>/api/webhooks/square`. Subscribe to `payment.created`,
+   `payment.updated`, `refund.created` and `refund.updated` — the receiver acts on
+   `payment.*` and `refund.*` only and ignores anything else (e.g. `order.*`). Put
+   Square's signature key in `SQUARE_WEBHOOK_SIGNATURE_KEY` and the identical URL in
+   `SQUARE_WEBHOOK_URL`. Restart, then confirm events land in Admin → Recent Square
+   events.
 5. Run Admin → Reconciliation over the test window and confirm it balances against
    what the Square dashboard shows.
 6. Only then swap in the **production** token and location and set
@@ -448,6 +459,8 @@ before taking real money:
 Milestones 1–7 are done and validated live on the VPS: scaffold + TLS, schema,
 operator auth / CRUD / intake, the operator UI, and the reorder endpoint. Billing was
 migrated from Squarespace to Square (carts, hosted checkout, webhook receiver,
-reconciliation) — validated end-to-end against the mock backend and covered by unit
-tests, but **not yet exercised against real Square credentials**. See `RESUME.md` for
+reconciliation) — validated end-to-end against the mock backend, covered by unit
+tests, and as of 2026-10-01 **connected to Square Sandbox** with one staff test payment
+verified against Square. Webhooks and production credentials are not yet set — see
+[Going live on Square](#going-live-on-square). See `RESUME.md` for
 current state and open questions.

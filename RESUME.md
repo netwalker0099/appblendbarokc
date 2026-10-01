@@ -1,6 +1,13 @@
 # Blend Bar — Resume Notes
 
-Last updated: 2026-09-17 — **the booking funnel exists end to end** (Milestone 14
+Last updated: 2026-10-01 — **Square is connected, in Sandbox** (Milestone 15
+below). The sandbox token and location are in `.env`, the live HTTP client made its
+first real requests, and a $1.00 staff checkout was paid with a test card and
+verified field-by-field against Square. Public checkout from share links is now
+held off (503) until `SQUARE_ENV=production`. **Resume at "Next session — start
+here" in Milestone 15.**
+
+2026-09-17 — **the booking funnel exists end to end** (Milestone 14
 below). The customer site got an About Us section and a copy pass; the events
 section now leads to a real booking form at `/book` instead of an Instagram DM;
 and `POST /api/public/event-enquiry` stores the enquiry, shows it in
@@ -39,7 +46,7 @@ This repo lives directly on the target VPS at `/opt/app` (hostname `app`, Ubuntu
 26.04). Docker, the Compose stack, and all validation in Milestones 1–3 have been
 run for real on this box, not in a separate sandbox.
 
-## Status: Milestones 1–14 done; see the header for what is and isn't connected
+## Status: Milestones 1–15 done; see the header for what is and isn't connected
 
 (The section below was written when there were seven and describes those. Later
 milestones have their own sections further down.)
@@ -846,6 +853,95 @@ sitting on the box — delete it once 0021 is trusted. (A world-readable plainte
 backup was a "fix now" finding in the 2026-07-24 review; this one was locked down
 immediately, but it should not live here.)
 
+## Milestone 15: Square Sandbox connected (2026-10-01)
+
+The first time the live Square client (`api/src/square/http.rs`) has talked to
+Square. Sandbox only — **no production credentials exist yet and no real money
+has moved.**
+
+**Credentials.** `SQUARE_ENV=sandbox`, `SQUARE_ACCESS_TOKEN` and
+`SQUARE_LOCATION_ID` are set in `.env` (entered by the owner directly — never
+pasted into a chat). The token was checked against `GET /v2/locations`: HTTP 200,
+and the configured location is `L1ECDK59DYSBM` ("Default Test Account", USD).
+The Square **application id is not needed** — hosted checkout uses only the
+server-side token. `.env` was still mode `644` at end of session — see below.
+
+**Restart.** `api` recreated; startup log reads `square: live HTTP client
+env="sandbox" location_id=L1ECDK59DYSBM` and the sync worker reports backend
+`square-sandbox`. Webhook receiver logs as disabled (no signature key yet).
+
+**Public checkout held off in sandbox** (`api/src/routes/public.rs`). The old
+guard was `is_live()`, which is true for sandbox too — so the moment sandbox was
+connected, a real customer on a share link would have been sent to a sandbox
+page that "takes" a payment and moves no money. The guard is now
+`is_live() && name() == "square-production"`, returning the same 503 the share
+page already handles. It switches on by itself when `SQUARE_ENV=production`;
+there is no flag to remember. Verified through Caddy: a valid request gets 503,
+the log names `backend="square-sandbox"`, and no customer or cart row was
+written. Staff checkout is unaffected.
+
+**Before that rebuild**, the working tree held ~32 files of uncommitted work. It
+was confirmed already-live (no `api/` file newer than the running image of
+2026-09-23; migration 23 applied), so the rebuild shipped only the guard change.
+**That uncommitted work is still uncommitted** — including this change.
+
+**The test payment.** Staff built a cart in `/checkout` with one ad-hoc "other"
+line, "test" × 1 @ $1.00, for customer "Ryan Taylor (example)"
+(`rtaylor@theblendbarokc.com`), and paid with a sandbox test card.
+
+| | Database | Square Sandbox |
+|---|---|---|
+| Cart / order | `2ee6ac46-3f8c-4e54-96e1-ef295b05a2e6`, `paid` | `oqHxeS2wcvTOBlXv61w7Kn3d77eZY`, `reference_id` = cart id |
+| Line | 1 × "test" @ 100¢ | 1 × "test" @ 100¢ |
+| Total | 100¢ total / 100¢ paid, USD | $1.00 USD |
+| Payment | `UlwTXvlCO6RMc2OFAexyC3zMJELZY` | same, `COMPLETED`, no refund |
+| Paid at | 17:49:34 UTC | created 17:49:34 UTC |
+| Link | `ZEUB5YMGAFUNXW5A` | same, on the same order |
+
+Timeline from the api log: checkout 17:48:53 → paid 17:49:34 → applied 17:52:07
+via "Check Square" (`POST /api/carts/:id/refresh`), since webhooks were off.
+
+Worth knowing, not wrong:
+- Square leaves the order `OPEN` — normal for payment-link orders; it stays open
+  until fulfilled in Square. The app does not depend on order state.
+- Square's payment response had no `card_details` populated. Not investigated;
+  it does not affect any field the app records.
+- **Webhook events:** the receiver acts on `payment.*` and `refund.*` only
+  (`routes/square_webhooks.rs`). `order.*` events are stored but ignored. (An
+  in-session suggestion to subscribe `order.updated` was wrong; README is right.)
+
+### Next session — start here
+
+In order:
+
+1. **Lock down `.env`:** `chmod 600 /opt/app/.env` (was `644` — any local user
+   could read the Square token).
+2. **Turn on webhooks.** Square developer dashboard → Sandbox → Webhooks → add a
+   subscription to exactly `https://app.theblendbarokc.com/api/webhooks/square`
+   (no trailing slash) for `payment.created`, `payment.updated`,
+   `refund.created`, `refund.updated`. Owner puts the signature key into `.env`
+   as `SQUARE_WEBHOOK_SIGNATURE_KEY`; `SQUARE_WEBHOOK_URL` is already set to
+   that URL. `docker compose up -d api`, then confirm the startup log no longer
+   says the receiver is disabled.
+3. **Second test payment, no refresh.** New $1.00 cart, pay with a test card,
+   and confirm it flips to `paid` **on its own** and the events show in
+   Admin → Recent Square events / `GET /api/square/events`.
+4. **Refund test.** Refund one test payment in the Square sandbox dashboard and
+   confirm `refund.updated` lands and the cart reflects it.
+5. **Reconciliation.** Admin → Reconciliation over 2026-10-01 onward; it should
+   balance against the Square sandbox dashboard.
+6. **Decide what to do with the test carts** on "Ryan Taylor (example)" —
+   confirm that is a test record, not a real customer; cancel or leave as
+   marked tests. They will appear in that customer's history and in
+   reconciliation.
+7. **Commit.** Decide how to split the outstanding uncommitted work; at minimum
+   commit the public-checkout guard and these doc updates on their own.
+8. **Go live** (only after 1–5): production token + location, `SQUARE_ENV=production`,
+   one real small payment, refund it. Public checkout turns on at this point —
+   test a share-link purchase then.
+
+Also still open, independent of Square: the **"Shop Now" link** (TODO.md).
+
 ## Not started
 
 Nothing is queued as unstarted *build* work. What remains is configuration, not
@@ -1123,13 +1219,13 @@ prerequisites. Treat any customer-facing work as needing its own security pass.
 
 ## Open items nobody has answered yet
 
-Checked against `.env` on 2026-09-17.
+Checked against `.env` on 2026-09-17; Square line updated 2026-10-01.
 
-- **Square is not connected.** `SQUARE_ACCESS_TOKEN`, `SQUARE_LOCATION_ID`,
-  `SQUARE_REDIRECT_URL` and `SQUARE_WEBHOOK_SIGNATURE_KEY` are all blank, so the
-  app runs the Square mock. **No payment can be taken until these are set.** The
-  billing code was built and tested against the mock in M9/M10 and has never
-  touched the live service.
+- **Square is on Sandbox, not production.** Token and location are set and a
+  sandbox payment was verified (Milestone 15). Still missing:
+  `SQUARE_WEBHOOK_SIGNATURE_KEY` (receiver returns 503), `SQUARE_REDIRECT_URL`
+  (optional), and production credentials. **No real money can be taken yet**, and
+  public share-link checkout is deliberately off until production.
 - **Email is not connected.** `GOOGLE_SA_KEY_FILE`, `GOOGLE_IMPERSONATE` and
   `SMTP_HOST` are blank and no service account exists, so portal sign-in links
   are logged rather than sent and the customer portal is effectively closed.
@@ -1155,13 +1251,16 @@ moved to Square in Milestone 9 (2026-07-27) and Squarespace is gone.
    written; commit first if not already done.
 2. `docker compose ps` — confirm all three services are healthy.
 3. Skim this file, then `README.md` for deploy mechanics.
+4. **Then go to Milestone 15 → "Next session — start here"** — that is the
+   current work queue (as of 2026-10-01: lock down `.env`, Square webhooks,
+   second test payment).
 
-**Everything is built. Almost nothing is connected.** Fourteen milestones of
-functionality sit behind four blank credentials. The single highest-value next
+**Everything is built; connection has started.** The single highest-value next
 step is whichever of these matters most to the business:
 
-- **Square** — no money can be taken at all until it is connected. This is the
-  one that stops the business operating.
+- **Square** — sandbox works; finish webhooks and the go-live steps
+  (Milestone 15) so real money can be taken. This is the one that stops the
+  business operating.
 - **Backups** — set a passphrase and a destination in Admin → Data. The quietest
   serious risk on the box: nothing breaks until the day everything is gone.
 - **Email** — a service account, then the customer portal actually works.
@@ -1175,5 +1274,6 @@ the old container still serving if it is interrupted between the two.
 
 Note: the instance was wiped clean on 2026-07-24 for real-data entry. The
 ingredient catalog has since been populated (18 ingredients as of 2026-09-17);
-customers and orders are still empty. Pre-wipe backup at
+as of 2026-10-01 there are 36 customers, 4 scents, and one cart (the $1.00
+sandbox test). Pre-wipe backup at
 `/opt/blendbar-preclear-backup-20260724-142713.sql` if ever needed.

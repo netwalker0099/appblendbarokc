@@ -165,8 +165,15 @@ pub async fn checkout(
     // malformed rather than that the service is down, and nothing should be
     // persisted for a checkout that cannot proceed. It also means the validation
     // above is genuinely exercisable while the app is still on the mock.
-    if !state.square.is_live() {
-        tracing::warn!("public checkout attempted while Square is not configured");
+    //
+    // Sandbox counts as not live here: a sandbox link takes a "payment" that
+    // moves no money, which is just as wrong to hand a real customer. Staff
+    // checkout still works against sandbox, which is how it gets tested.
+    if !state.square.is_live() || state.square.name() != "square-production" {
+        tracing::warn!(
+            backend = state.square.name(),
+            "public checkout attempted while Square is not in production"
+        );
         return Err(AppError::Unavailable(
             "online checkout is not available right now".into(),
         ));
