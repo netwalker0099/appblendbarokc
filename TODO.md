@@ -29,9 +29,8 @@ Milestone 17 (Square Terminal, 2026-10-08).
   pasted into chat), and a decision on whether contact sync to Square Customers
   stays (it alone needs `CUSTOMERS_READ/WRITE`).
   2026-10-12: `.env` has `SQUARE_OAUTH_APPLICATION_ID` (ok) and
-  `SQUARE_OAUTH_APPLICATION_SECRET`, but the secret holds an `EAAA…` access
-  token, not the `sq0csp-…` secret; the owner needs to replace it. The OAuth
-  "Connect Square" flow is not built yet.
+  `SQUARE_OAUTH_APPLICATION_SECRET` (`sq0csp-…`), both checked by format. Still
+  to do: the contact-sync decision, then build the "Connect Square" flow.
 
 - [x] **`chmod 600 /opt/app/.env`.** It is `644`; it now holds the Square token.
 - [x] **Square sandbox webhooks.** Developer dashboard → Sandbox → Webhooks →
