@@ -1,5 +1,5 @@
 //! The Square boundary. Everything this app asks of Square goes through the
-//! [`Square`] trait, so the cart/checkout/reconciliation code can be driven by an
+//! [`Square`] trait, so the cart/checkout/Terminal code can be driven by an
 //! in-process mock (no credentials) or the real HTTP client (credentials present)
 //! without any caller changing. Same shape as the Squarespace boundary it
 //! replaces, for the same reason: the interesting logic stays testable on a box
@@ -85,6 +85,9 @@ pub struct CheckoutPush {
     /// Where Square sends the browser after a successful payment.
     pub redirect_url: Option<String>,
     pub note: Option<String>,
+    /// Have Square's hosted page collect a shipping address. Only the online
+    /// shop sets this — everything else is handed over at the bar.
+    pub ask_for_shipping_address: bool,
 }
 
 /// What Square hands back when a payment link is created.
@@ -94,6 +97,66 @@ pub struct CheckoutHandle {
     pub square_order_id: String,
     /// The hosted page the customer actually pays on.
     pub url: String,
+}
+
+/// A checkout sent to a Square Terminal through the cloud Terminal API.
+///
+/// The Terminal is a Wi-Fi device paired to this app's Square account; Square
+/// relays the request to it, the customer taps or inserts, and the result comes
+/// back as a payment on the Square order. The browser that pressed the button
+/// is never involved in the card side at all, so it works the same from a
+/// laptop or an iPad.
+#[derive(Debug, Clone)]
+pub struct TerminalCheckoutPush {
+    /// Reused on retries so a timed-out request can't put two checkouts on
+    /// the device.
+    pub idempotency_key: String,
+    /// The Square order this pays. The payment Square records carries it,
+    /// which is how settlement finds the cart — the same join the payment-link
+    /// path uses.
+    pub square_order_id: String,
+    pub amount_cents: i64,
+    pub currency: String,
+    pub device_id: String,
+    /// Our cart id, for Square-side searching.
+    pub reference_id: String,
+    pub note: Option<String>,
+}
+
+/// A Terminal checkout as Square currently reports it.
+#[derive(Debug, Clone)]
+pub struct TerminalCheckout {
+    pub id: String,
+    /// PENDING, IN_PROGRESS, CANCEL_REQUESTED, CANCELED or COMPLETED.
+    pub status: String,
+    /// Set once the customer has paid.
+    pub payment_ids: Vec<String>,
+    /// BUYER_CANCELED, SELLER_CANCELED or TIMED_OUT, when canceled.
+    pub cancel_reason: Option<String>,
+}
+
+impl TerminalCheckout {
+    /// Still waiting on the device — another checkout must not be sent.
+    pub fn is_active(&self) -> bool {
+        is_active_terminal_status(&self.status)
+    }
+}
+
+pub fn is_active_terminal_status(status: &str) -> bool {
+    matches!(status, "PENDING" | "IN_PROGRESS" | "CANCEL_REQUESTED")
+}
+
+/// A one-time code for signing a Square Terminal in to this app.
+#[derive(Debug, Clone)]
+pub struct DeviceCode {
+    pub id: String,
+    /// What the operator types on the Terminal's sign-in screen.
+    pub code: String,
+    /// UNPAIRED, PAIRED or EXPIRED.
+    pub status: String,
+    /// Set once paired — the id checkouts are sent to.
+    pub device_id: Option<String>,
+    pub pair_by: Option<DateTime<Utc>>,
 }
 
 /// Authoritative state of a payment, fetched back from Square. A webhook carries
@@ -191,14 +254,34 @@ pub trait Square: Send + Sync {
         square_order_id: &str,
     ) -> Result<Option<RemotePayment>, SquareError>;
 
-    /// Every payment in a window, for reconciliation. Implementations must follow
-    /// Square's cursor pagination to completion — a truncated list would show up
-    /// as phantom "missing in Square" rows.
-    async fn list_payments(
+    /// Create a Square order for a cart, for paying on a Terminal. (A payment
+    /// link creates its own order, so the link path doesn't use this.)
+    /// Returns the Square order id. Idempotent on `push.idempotency_key`.
+    async fn create_order(&self, push: &CheckoutPush) -> Result<String, SquareError>;
+
+    /// Send a checkout to a paired Square Terminal.
+    async fn create_terminal_checkout(
         &self,
-        begin: DateTime<Utc>,
-        end: DateTime<Utc>,
-    ) -> Result<Vec<RemotePayment>, SquareError>;
+        push: &TerminalCheckoutPush,
+    ) -> Result<TerminalCheckout, SquareError>;
+
+    /// Square's current view of a Terminal checkout — the polling path, and
+    /// what the webhook re-fetches rather than trusting the payload.
+    async fn get_terminal_checkout(&self, checkout_id: &str)
+        -> Result<TerminalCheckout, SquareError>;
+
+    /// Ask the Terminal to drop a checkout that hasn't been paid. Only possible
+    /// while it is PENDING or IN_PROGRESS.
+    async fn cancel_terminal_checkout(
+        &self,
+        checkout_id: &str,
+    ) -> Result<TerminalCheckout, SquareError>;
+
+    /// Ask Square for a code to sign a Terminal in to this app with.
+    async fn create_device_code(&self, name: &str) -> Result<DeviceCode, SquareError>;
+
+    /// Whether a device code has been used yet, and by which Terminal.
+    async fn get_device_code(&self, code_id: &str) -> Result<DeviceCode, SquareError>;
 
     /// Void a payment link so it can no longer be paid.
     ///

@@ -1,15 +1,16 @@
 <script setup>
 /**
- * Checkout: build a cart and hand it to Square.
+ * Checkout: build a cart for a customer's unsold blends (plus any deposits or
+ * fees) and take payment.
  *
- * The operator never touches a card. This screen assembles the cart, asks the
- * API for a Square-hosted payment link, and then shows a QR code the customer
- * scans to pay on their own phone. Card details go straight from that phone to
- * Square — never through the tablet, this app, or the shop's network.
+ * Payment itself is PayPanel: on a paired Square Terminal by default, or a
+ * Square payment link / QR. Either way the operator never touches a card, and
+ * no card details pass through this device or this app.
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import PayPanel from '../components/PayPanel.vue'
 import { api } from '../lib/api.js'
 import { bottleLabel } from '../lib/bottle.js'
 
@@ -25,17 +26,11 @@ const selectedOrderIds = ref(new Set())
 const extras = ref([])
 
 const cart = ref(null)
-const checkout = ref(null)
 const squareLive = ref(true)
 
 const busy = ref('')
 const error = ref('')
 const notice = ref('')
-
-// While a link is live, poll Square through our API so the screen flips to PAID
-// on its own. The webhook usually gets there first; this covers the case where
-// webhooks aren't configured yet, and means the operator isn't left guessing.
-let poll = null
 
 onMounted(async () => {
   try {
@@ -56,15 +51,6 @@ onMounted(async () => {
     await search()
   }
 })
-
-onUnmounted(stopPolling)
-
-function stopPolling() {
-  if (poll) {
-    clearInterval(poll)
-    poll = null
-  }
-}
 
 async function search() {
   busy.value = 'search'
@@ -151,8 +137,8 @@ function money(cents) {
   return `$${(cents / 100).toFixed(2)}`
 }
 
-async function createAndCheckout() {
-  busy.value = 'checkout'
+async function createCart() {
+  busy.value = 'cart'
   error.value = ''
   notice.value = ''
   try {
@@ -169,9 +155,6 @@ async function createAndCheckout() {
         })),
     }
     cart.value = await api.createCart(body)
-    checkout.value = await api.checkoutCart(cart.value.id)
-    squareLive.value = checkout.value.live
-    startPolling()
   } catch (err) {
     error.value = err.message
   } finally {
@@ -179,84 +162,25 @@ async function createAndCheckout() {
   }
 }
 
-function startPolling() {
-  stopPolling()
-  poll = setInterval(async () => {
-    try {
-      const fresh = await api.getCart(cart.value.id)
-      cart.value = fresh
-      if (fresh.status !== 'pending_payment') stopPolling()
-    } catch {
-      // Transient; the next tick tries again.
-    }
-  }, 5000)
-}
-
-/** Ask Square directly — the backstop when a webhook never arrives. */
-async function refresh() {
-  busy.value = 'refresh'
-  error.value = ''
-  notice.value = ''
-  try {
-    const result = await api.refreshCart(cart.value.id)
-    notice.value = result.detail
-    cart.value = await api.getCart(cart.value.id)
-    if (cart.value.status !== 'pending_payment') stopPolling()
-  } catch (err) {
-    error.value = err.message
-  } finally {
-    busy.value = ''
-  }
-}
-
-async function cancel() {
-  busy.value = 'cancel'
-  error.value = ''
-  try {
-    await api.cancelCart(cart.value.id)
-    stopPolling()
-    reset()
-    notice.value = 'Cart canceled. Those blends are free to sell again.'
-  } catch (err) {
-    error.value = err.message
-  } finally {
-    busy.value = ''
-  }
+function onCanceled() {
+  reset()
+  notice.value = 'Sale canceled. Those blends are free to sell again.'
 }
 
 function reset() {
-  stopPolling()
   cart.value = null
-  checkout.value = null
   extras.value = []
   if (customer.value) loadOrders()
 }
 
 function startOver() {
-  stopPolling()
   cart.value = null
-  checkout.value = null
   customer.value = null
   extras.value = []
   orders.value = []
   router.replace({ name: 'checkout' })
   search()
 }
-
-async function copyLink() {
-  try {
-    await navigator.clipboard.writeText(checkout.value.checkout_url)
-    notice.value = 'Payment link copied.'
-  } catch {
-    notice.value = 'Could not copy — long-press the link to copy it.'
-  }
-}
-
-const paid = computed(() => cart.value?.status === 'paid')
-const shortfall = computed(() => {
-  if (!paid.value || cart.value.paid_cents == null) return 0
-  return cart.value.paid_cents - cart.value.total_cents
-})
 
 watch(customer, () => {
   notice.value = ''
@@ -317,7 +241,7 @@ watch(customer, () => {
   </template>
 
   <!-- Step 2: build the cart -->
-  <template v-else-if="!checkout">
+  <template v-else-if="!cart">
     <button class="ghost" type="button" @click="startOver">← Different customer</button>
 
     <div class="card" style="margin-top: 1rem">
@@ -430,82 +354,21 @@ watch(customer, () => {
         class="primary"
         type="button"
         style="margin-top: 0.9rem"
-        :disabled="!canCreate || busy === 'checkout'"
-        @click="createAndCheckout"
+        :disabled="!canCreate || busy === 'cart'"
+        @click="createCart"
       >
-        {{ busy === 'checkout' ? 'Contacting Square…' : 'Create payment link' }}
+        {{ busy === 'cart' ? 'Building the cart…' : 'Continue to payment' }}
       </button>
     </div>
   </template>
 
   <!-- Step 3: take the payment -->
   <template v-else>
-    <div class="card pay-card">
-      <h2 v-if="!paid">Scan to pay</h2>
-      <h2 v-else class="paid-head">Paid ✓</h2>
-
-      <p class="total" style="text-align: center">{{ money(cart.total_cents) }}</p>
-
-      <template v-if="!paid && cart.status === 'pending_payment'">
-        <p class="muted" style="text-align: center">
-          The customer scans this with their phone camera and pays on Square's page.
-        </p>
-        <div class="qr">
-          <img :src="`/api/carts/${cart.id}/checkout.svg`" alt="Payment QR code" />
-        </div>
-        <div class="row" style="justify-content: center; gap: 0.5rem; flex-wrap: wrap">
-          <a class="ghost" :href="checkout.checkout_url" target="_blank" rel="noopener" style="flex: none">
-            Open link
-          </a>
-          <button class="ghost" type="button" style="flex: none" @click="copyLink">Copy link</button>
-          <button
-            class="ghost"
-            type="button"
-            style="flex: none"
-            :disabled="busy === 'refresh'"
-            @click="refresh"
-          >
-            {{ busy === 'refresh' ? 'Checking…' : 'Check Square' }}
-          </button>
-        </div>
-        <p class="muted" style="text-align: center; margin-top: 0.75rem">
-          This page updates on its own when the payment lands.
-        </p>
-      </template>
-
-      <template v-else-if="paid">
-        <p style="text-align: center">
-          Square collected {{ money(cart.paid_cents ?? cart.total_cents) }}.
-        </p>
-        <p class="danger-text" style="text-align: center" v-if="shortfall !== 0">
-          That is {{ money(Math.abs(shortfall)) }}
-          {{ shortfall > 0 ? 'more' : 'less' }} than the quoted total — it will show up
-          on the reconciliation report.
-        </p>
-        <p class="muted" style="text-align: center">
-          The blends on this cart are now marked paid.
-        </p>
-      </template>
-
-      <template v-else>
-        <p style="text-align: center">This cart is {{ cart.status }}.</p>
-      </template>
-
-      <div class="row" style="justify-content: center; gap: 0.5rem; margin-top: 1rem">
-        <button class="primary" type="button" style="flex: none" @click="startOver">
-          Next customer
-        </button>
-        <button
-          v-if="cart.status === 'pending_payment'"
-          class="ghost"
-          type="button"
-          style="flex: none"
-          :disabled="busy === 'cancel'"
-          @click="cancel"
-        >
-          Cancel cart
-        </button>
-      </div>
+    <PayPanel :key="cart.id" :cart-id="cart.id" @canceled="onCanceled" />
+    <div class="row" style="justify-content: center; margin-top: 0.5rem">
+      <button class="primary" type="button" style="flex: none" @click="startOver">
+        Next customer
+      </button>
     </div>
   </template>
 </template>
@@ -562,25 +425,4 @@ watch(customer, () => {
   bottom: 0;
 }
 
-.pay-card {
-  text-align: center;
-}
-
-.paid-head {
-  color: var(--ok, #2f7d4f);
-}
-
-.qr {
-  display: flex;
-  justify-content: center;
-  margin: 1rem 0;
-}
-
-.qr img {
-  width: 260px;
-  height: 260px;
-  background: #fff;
-  padding: 0.75rem;
-  border-radius: 4px;
-}
 </style>

@@ -304,10 +304,12 @@ async fn deliver(
 /// Human description of an order, for the customer's benefit.
 fn describe(order_type: &str, size: &str, scent_name: Option<&str>) -> String {
     let size_label = match size {
+        "vintage" => "Vintage",
         "oz3_4" => "3.4 oz",
         "oz1_7" => "1.7 oz",
+        "oz1_2" => "1 oz",
         "roller" => "Roller",
-        "spray" => "Spray, 10 ml",
+        "spray" => "Spray",
         other => other,
     };
     let what = match (order_type, scent_name) {
@@ -377,7 +379,7 @@ mod tests {
         );
         assert_eq!(
             describe("custom_mix", "spray", None),
-            "Your custom blend (Spray, 10 ml)"
+            "Your custom blend (Spray)"
         );
         // A set perfume whose scent has since been deleted must still read
         // sensibly rather than showing a blank or an id.

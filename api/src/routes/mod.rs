@@ -15,17 +15,19 @@ pub mod mixes;
 pub mod notifications;
 pub mod orders;
 pub mod public;
-pub mod reconciliation;
 pub mod restore;
 pub mod scents;
 pub mod session;
 pub mod settings;
+pub mod shop;
+pub mod square_status;
 pub mod square_webhooks;
 pub mod sync;
+pub mod terminal;
 
 use axum::extract::DefaultBodyLimit;
 use axum::middleware;
-use axum::routing::{get, patch, post};
+use axum::routing::{get, patch, post, put};
 use axum::Router;
 
 use crate::{employee_auth, AppState};
@@ -67,19 +69,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/mixes/:id/delete", post(deletions::delete_mix))
         .route("/api/orders/:id/delete", post(deletions::delete_order))
         .route("/api/orders/:id/fulfil", post(orders::fulfil))
-        // Outbound email. Relay credentials stay in the environment; only the
-        // sender identity and toggles are settable here.
+        // Outbound email. The relay lives in the environment; only the sender
+        // identity and toggles are settable here.
         .route(
             "/api/email/settings",
             get(email_admin::get).patch(email_admin::update),
         )
         .route("/api/email/test", post(email_admin::test))
-        // The service-account key is written to a file, never a DB column, so it
-        // stays out of the downloadable pg_dump backup.
-        .route(
-            "/api/email/google",
-            post(email_admin::connect_google).delete(email_admin::disconnect_google),
-        )
         .route("/api/email/recent", get(email_admin::recent))
         .route("/api/ingredients/:id/delete", post(deletions::delete_ingredient))
         .route("/api/scents/:id/delete", post(deletions::delete_scent))
@@ -91,9 +87,28 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/carts/:id/checkout.svg", get(carts::checkout_qr))
         .route("/api/carts/:id/refresh", post(carts::refresh))
         .route("/api/carts/:id/cancel", post(carts::cancel))
-        .route("/api/square/status", get(reconciliation::status))
-        .route("/api/square/reconcile", get(reconciliation::reconcile))
-        .route("/api/square/reconcile/history", get(reconciliation::history))
+        // Charging a cart on a Square Terminal. GET is the poll the checkout
+        // screen runs while the customer pays; it settles the cart when Square
+        // reports the payment, so the screen flips without needing webhooks.
+        .route(
+            "/api/carts/:id/terminal",
+            get(terminal::status).post(terminal::charge),
+        )
+        .route("/api/carts/:id/terminal/cancel", post(terminal::cancel))
+        // Paired Terminals. Listing is open to any employee (intake needs to
+        // know there is one); pairing and managing them is admin-only.
+        .route(
+            "/api/square/terminals",
+            get(terminal::list).post(terminal::add_by_id),
+        )
+        .route("/api/square/terminals/pair", post(terminal::pair))
+        .route(
+            "/api/square/terminals/:id",
+            get(terminal::check_pairing)
+                .patch(terminal::update)
+                .delete(terminal::remove),
+        )
+        .route("/api/square/status", get(square_status::status))
         .route("/api/square/events", get(square_webhooks::recent))
         // Chat notifications for customer-triggered events (admin-only).
         .route(
@@ -119,6 +134,12 @@ pub fn build_router(state: AppState) -> Router {
         // export of every customer record.
         .route("/api/admin/backup/status", get(backup_admin::status))
         .route("/api/admin/backup/passphrase", post(backup_admin::set_passphrase))
+        // The Google key that Drive uploads use. Written to a file, never a DB
+        // column, so it stays out of the downloadable pg_dump backup.
+        .route(
+            "/api/admin/backup/google",
+            post(backup_admin::connect_google).delete(backup_admin::disconnect_google),
+        )
         .route(
             "/api/admin/backup/destinations",
             get(backup_admin::list).post(backup_admin::create),
@@ -154,6 +175,24 @@ pub fn build_router(state: AppState) -> Router {
         // Archiving is a POST because it changes things — and, like every other
         // mutation, the act of archiving is itself written to the audit log.
         .route("/api/admin/audit/archive", post(audit_log::archive_now))
+        // The online shop (Admin → Shop). Admin-only throughout, via the
+        // `AdminEmployee` extractor on each handler.
+        .route("/api/shop/products", get(shop::list).post(shop::create))
+        .route(
+            "/api/shop/products/:id",
+            patch(shop::update).delete(shop::remove),
+        )
+        .route("/api/shop/products/order", put(shop::reorder))
+        // A raw image body. The limit sits just above the handler's own 5MB
+        // check so an oversized photo gets the sentence, not a bare 413.
+        .route(
+            "/api/shop/images",
+            post(shop::upload_image).layer(DefaultBodyLimit::max(shop::MAX_IMAGE_BYTES + 1024)),
+        )
+        .route(
+            "/api/shop/settings",
+            get(shop::get_settings).put(shop::update_settings),
+        )
         .route("/api/settings", get(settings::get).patch(settings::update))
         .route("/api/employees", get(employees::list).post(employees::create))
         .route("/api/employees/:id", patch(employees::update))
@@ -205,6 +244,14 @@ pub fn build_router(state: AppState) -> Router {
         // Anonymous checkout from a share link. Rate-limited, server-priced, and
         // disabled unless Square is live — see the handler docs.
         .route("/api/public/checkout", post(public::checkout))
+        // The online shop. The catalogue and photos are read-only; the
+        // checkout follows every rule of the share-page checkout above.
+        .route("/api/public/shop", get(shop::catalogue))
+        .route("/api/public/shop/images/:id", get(shop::image))
+        .route(
+            "/api/public/shop/checkout",
+            post(shop::checkout).layer(DefaultBodyLimit::max(16 * 1024)),
+        )
         // The public booking form. Unauthenticated by necessity — a prospective
         // customer has no account — so it is rate limited, fully validated
         // server-side, and capped well below the default body limit: an event

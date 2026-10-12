@@ -1,7 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 
-import { formatMl } from '../lib/bottle.js'
+import { BOTTLE_SIZES, formatMl, formulaCheck } from '../lib/bottle.js'
 import MixBuilder from './MixBuilder.vue'
 
 const props = defineProps({
@@ -28,12 +28,11 @@ watch(
         ingredient_id: i.ingredient_id,
         amount_ml: Number(i.amount_ml),
       }))
-      prices[scent.id] = {
-        oz3_4: scent.price_oz3_4 ?? '',
-        oz1_7: scent.price_oz1_7 ?? '',
-        roller: scent.price_roller ?? '',
-        spray: scent.price_spray ?? '',
-      }
+      // Keyed off BOTTLE_SIZES so a new size picks up its own price box here
+      // without this component needing to know the list.
+      prices[scent.id] = Object.fromEntries(
+        BOTTLE_SIZES.map((size) => [size.value, scent[`price_${size.value}`] ?? '']),
+      )
     }
   },
   { immediate: true, deep: true },
@@ -53,16 +52,15 @@ function summarize(scent) {
 }
 
 function priceSummary(scent) {
-  const parts = [
-    ['3.4oz', scent.price_oz3_4],
-    ['1.7oz', scent.price_oz1_7],
-    ['roller', scent.price_roller],
-    ['spray', scent.price_spray],
-  ]
+  const parts = BOTTLE_SIZES.map((size) => [size.label, scent[`price_${size.value}`]])
     .filter(([, v]) => v != null)
     .map(([label, v]) => `${label} $${v}`)
   return parts.length ? parts.join(' · ') : 'No prices set'
 }
+
+/// An empty formula is allowed (the recipe isn't written yet, but prices can
+/// be); anything entered must add up to 100 ml before it can be saved.
+const formulaBlocked = (id) => forms[id].length > 0 && !formulaCheck(forms[id]).ok
 
 const priceVal = (v) => (v === '' || v === null ? null : Number(v))
 
@@ -82,12 +80,12 @@ async function save(scent) {
   saving[scent.id] = true
   try {
     const p = prices[scent.id]
-    await emit('save', scent, forms[scent.id], {
-      oz3_4: priceVal(p.oz3_4),
-      oz1_7: priceVal(p.oz1_7),
-      roller: priceVal(p.roller),
-      spray: priceVal(p.spray),
-    })
+    await emit(
+      'save',
+      scent,
+      forms[scent.id],
+      Object.fromEntries(BOTTLE_SIZES.map((size) => [size.value, priceVal(p[size.value])])),
+    )
   } finally {
     saving[scent.id] = false
   }
@@ -137,28 +135,27 @@ async function save(scent) {
         <div class="card" style="margin: 0.6rem 0">
           <h2>Prices ($)</h2>
           <div class="row">
-            <div>
-              <label>3.4 oz</label>
-              <input type="number" inputmode="decimal" min="0" step="0.01" v-model="prices[scent.id].oz3_4" />
-            </div>
-            <div>
-              <label>1.7 oz</label>
-              <input type="number" inputmode="decimal" min="0" step="0.01" v-model="prices[scent.id].oz1_7" />
-            </div>
-            <div>
-              <label>Roller</label>
-              <input type="number" inputmode="decimal" min="0" step="0.01" v-model="prices[scent.id].roller" />
-            </div>
-            <div>
-              <label>Spray (10 ml)</label>
-              <input type="number" inputmode="decimal" min="0" step="0.01" v-model="prices[scent.id].spray" />
+            <div v-for="size in BOTTLE_SIZES" :key="size.value">
+              <label :for="`price-${scent.id}-${size.value}`">{{ size.label }}</label>
+              <input
+                :id="`price-${scent.id}-${size.value}`"
+                v-model="prices[scent.id][size.value]"
+                type="number"
+                inputmode="decimal"
+                min="0"
+                step="0.01"
+              />
             </div>
           </div>
+          <p class="muted">A blank price means this scent is not sold in that size.</p>
         </div>
 
-        <button class="ghost" type="button" :disabled="saving[scent.id]" @click="save(scent)">
+        <button class="ghost" type="button" :disabled="saving[scent.id] || formulaBlocked(scent.id)" @click="save(scent)">
           {{ saving[scent.id] ? 'Saving…' : 'Save formula & prices' }}
         </button>
+        <p class="muted field-help" v-if="formulaBlocked(scent.id)">
+          The formula has to add up to 100 ml before this scent can be saved.
+        </p>
       </template>
     </div>
   </div>

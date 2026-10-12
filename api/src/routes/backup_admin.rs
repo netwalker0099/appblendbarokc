@@ -56,6 +56,20 @@ pub async fn status(
             .fetch_one(&state.db)
             .await?;
 
+    // Which Google identity Drive uploads would use. The private key is never
+    // read back out — only the service-account address, which is not a secret.
+    let key_env_managed = crate::email::credentials::env_managed();
+    let google = crate::email::gmail::load_service_account()
+        .or_else(crate::email::credentials::load_stored)
+        .and_then(|r| r.ok())
+        .map(|a| a.client_email);
+
+    let impersonate: Option<String> =
+        sqlx::query_scalar("select google_impersonate from email_settings where id = true")
+            .fetch_optional(&state.db)
+            .await?
+            .flatten();
+
     // A destination existing is not the same as a backup having happened.
     let last_success: Option<DateTime<Utc>> =
         sqlx::query_scalar("select max(started_at) from backup_runs where status = 'ok'")
@@ -66,15 +80,118 @@ pub async fn status(
     Ok(Json(json!({
         "passphrase_set": backup::passphrase::is_set(),
         "passphrase_env_managed": backup::passphrase::env_managed(),
-        // Drive reuses the mailer's key, so "can we back up to Drive" is
-        // answered by whether Google is connected at all.
-        "google_connected": crate::email::gmail::load_service_account()
-            .or_else(crate::email::credentials::load_stored)
-            .is_some(),
+        // Drive is the only thing left that needs a Google key — email sends
+        // through the Workspace relay, which authorises by IP.
+        "google_connected": google.is_some() || key_env_managed,
+        "google_env_managed": key_env_managed,
+        "google_service_account": google,
+        "google_impersonate": impersonate,
         "email_live": state.mailer().is_live(),
         "enabled_destinations": destinations,
         "last_success_at": last_success,
         "sharepoint_available": false,
+    })))
+}
+
+/// Cheap sanity check on a mailbox address, so an obvious typo is caught before
+/// a 3am Drive upload is the thing that reports it.
+fn looks_like_an_address(value: &str) -> bool {
+    let v = value.trim();
+    let mut parts = v.splitn(2, '@');
+    let local = parts.next().unwrap_or("");
+    let domain = parts.next().unwrap_or("");
+    !local.is_empty()
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && !v.contains(' ')
+}
+
+#[derive(Deserialize)]
+pub struct ConnectGoogle {
+    /// The downloaded service-account JSON, pasted whole.
+    pub service_account_json: String,
+    /// The Workspace mailbox Drive uploads run as. A service account has no
+    /// Drive of its own, so without this the file has nowhere to land.
+    pub impersonate: String,
+}
+
+/// Store a Google service-account key for Drive backups.
+///
+/// The key is written to a file on a mounted volume, **not** to a database
+/// column — `GET /api/admin/backup` hands an admin a full pg_dump, and a
+/// credential in a table would ride along in every copy of it. It is never read
+/// back out to a browser; the panel only ever sees the service-account address.
+///
+/// Email is untouched by this: it sends through the Workspace SMTP relay, and a
+/// key uploaded here does not move it.
+pub async fn connect_google(
+    _admin: AdminEmployee,
+    State(state): State<AppState>,
+    Json(body): Json<ConnectGoogle>,
+) -> Result<Json<Value>, AppError> {
+    if crate::email::credentials::env_managed() {
+        return Err(AppError::Conflict(
+            "a Google key is configured in the server environment, which takes \
+             precedence. Remove GOOGLE_SA_KEY_FILE / GOOGLE_SA_KEY_JSON from .env \
+             to manage it from here instead."
+                .into(),
+        ));
+    }
+
+    let impersonate = body.impersonate.trim().to_lowercase();
+    if !looks_like_an_address(&impersonate) {
+        return Err(AppError::BadRequest(
+            "enter the Workspace mailbox Drive should upload as, e.g. \
+             hello@theblendbarokc.com"
+                .into(),
+        ));
+    }
+
+    // Validated and written before anything else changes, so a bad paste leaves
+    // the previous working setup untouched.
+    let account = crate::email::credentials::store(&body.service_account_json)
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+
+    sqlx::query("update email_settings set google_impersonate = $1, updated_at = now() where id = true")
+        .bind(&impersonate)
+        .execute(&state.db)
+        .await?;
+
+    tracing::info!(
+        service_account = %account.client_email,
+        uploading_as = %impersonate,
+        "google credentials stored for drive backups"
+    );
+
+    Ok(Json(json!({
+        "ok": true,
+        "service_account": account.client_email,
+        "impersonate": impersonate,
+        "detail": "Connected. Run a Drive destination once to confirm the \
+                   delegation is authorised.",
+    })))
+}
+
+/// Forget the stored key. Drive destinations stop working; every other
+/// destination, and email, are unaffected.
+pub async fn disconnect_google(
+    _admin: AdminEmployee,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, AppError> {
+    let removed = crate::email::credentials::remove_stored()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let drive_destinations: i64 = sqlx::query_scalar(
+        "select count(*) from backup_destinations where kind = 'google_drive' and enabled",
+    )
+    .fetch_one(&state.db)
+    .await?;
+
+    Ok(Json(json!({
+        "removed": removed,
+        // Said plainly rather than discovered at the next scheduled run.
+        "disabled_destinations": drive_destinations,
     })))
 }
 

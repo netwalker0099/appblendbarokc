@@ -16,7 +16,7 @@
  *     alternative is finding out from a red row at 3am — by which point that
  *     night's backup has already not happened.
  */
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 
 import { api } from '../lib/api.js'
 
@@ -33,6 +33,11 @@ const notice = ref('')
 
 const passphrase = ref('')
 const confirmPassphrase = ref('')
+
+// Google, for Drive uploads only. Email does not use a key: it goes through the
+// Workspace SMTP relay, which authorises this server by IP.
+const saJson = ref('')
+const impersonate = ref('')
 
 const showAdd = ref(false)
 const form = reactive({
@@ -73,6 +78,61 @@ const WEEKDAYS = [
 const passphraseSet = computed(() => Boolean(props.status?.passphrase_set))
 const envManaged = computed(() => Boolean(props.status?.passphrase_env_managed))
 const googleConnected = computed(() => Boolean(props.status?.google_connected))
+const googleAccount = computed(() => props.status?.google_service_account ?? '')
+// When the key comes from the server's .env the browser must not pretend it can
+// change it — two sources of truth for a credential is how they drift apart.
+const googleEnvManaged = computed(() => Boolean(props.status?.google_env_managed))
+
+watch(
+  () => props.status,
+  (s) => {
+    if (s && !impersonate.value) impersonate.value = s.google_impersonate ?? ''
+  },
+  { immediate: true },
+)
+
+async function connectGoogle() {
+  if (!saJson.value.trim() || !impersonate.value.trim()) {
+    error.value = 'Paste the service account key and enter the mailbox to upload as.'
+    return
+  }
+  busy.value = 'google'
+  error.value = ''
+  notice.value = ''
+  try {
+    const res = await api.connectGoogle({
+      service_account_json: saJson.value,
+      impersonate: impersonate.value.trim(),
+    })
+    // Cleared immediately: the key is stored server-side and there is no reason
+    // for it to sit in the page afterwards.
+    saJson.value = ''
+    notice.value = res.detail
+    emit('changed')
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    busy.value = ''
+  }
+}
+
+async function disconnectGoogle() {
+  if (!window.confirm('Disconnect Google? Drive backups will stop until it is reconnected.')) return
+  busy.value = 'google'
+  error.value = ''
+  notice.value = ''
+  try {
+    const res = await api.disconnectGoogle()
+    notice.value = res.disabled_destinations
+      ? `Google disconnected. ${res.disabled_destinations} Drive destination(s) can no longer run.`
+      : 'Google disconnected.'
+    emit('changed')
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    busy.value = ''
+  }
+}
 const emailLive = computed(() => Boolean(props.status?.email_live))
 
 /**
@@ -291,6 +351,87 @@ async function remove(dest) {
     </dl>
 
     <!-- Encryption comes first because nothing else works without it. -->
+    <hr style="border: 0; border-top: 1px solid var(--border); margin: 1.2rem 0" />
+
+    <h3 style="margin-bottom: 0.6rem">Google connection</h3>
+    <p class="muted field-help" style="margin-top: 0">
+      Only <strong>Drive</strong> destinations need this. Backups sent to an
+      email address go through the Workspace relay, which needs no key — and
+      email itself no longer uses one at all.
+    </p>
+
+    <dl class="summary" v-if="googleConnected">
+      <dt>Service account</dt>
+      <dd><code>{{ googleAccount || 'set in the server environment' }}</code></dd>
+      <dt>Uploading as</dt>
+      <dd><code>{{ props.status?.google_impersonate || '—' }}</code></dd>
+    </dl>
+
+    <p class="muted" v-if="googleEnvManaged">
+      The key is configured in the server’s <code>.env</code>, which takes
+      precedence over anything set here. Remove <code>GOOGLE_SA_KEY_FILE</code> to
+      manage it from this page instead.
+    </p>
+
+    <template v-else>
+      <div class="field">
+        <label>Upload as (Workspace mailbox)</label>
+        <input
+          v-model="impersonate"
+          type="email"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="hello@theblendbarokc.com"
+        />
+      </div>
+
+      <div class="field">
+        <label>Service account key (JSON)</label>
+        <textarea
+          v-model="saJson"
+          rows="5"
+          spellcheck="false"
+          autocomplete="off"
+          :placeholder="googleConnected
+            ? 'Paste a new key here only if you are replacing the current one'
+            : 'Paste the whole downloaded JSON key file'"
+        ></textarea>
+      </div>
+      <p class="muted field-help">
+        Google Cloud → enable the <strong>Drive API</strong> → create a
+        <strong>service account</strong> → Keys → Add key → JSON. Then in Google
+        Admin → Security → API controls → <strong>Domain-wide delegation</strong>,
+        authorise that service account’s client ID for the single scope
+        <code>https://www.googleapis.com/auth/drive.file</code>.
+        The key is stored on the server as a file — never in the database, so it
+        can’t end up inside a downloaded backup — and is never shown again here.
+      </p>
+
+      <div class="row" style="gap: 0.5rem">
+        <button
+          class="ghost"
+          type="button"
+          style="flex: none"
+          :disabled="busy === 'google'"
+          @click="connectGoogle"
+        >
+          {{ busy === 'google' ? 'Connecting…' : googleConnected ? 'Replace key' : 'Connect Google' }}
+        </button>
+        <button
+          v-if="googleConnected"
+          class="ghost"
+          type="button"
+          style="flex: none"
+          :disabled="busy === 'google'"
+          @click="disconnectGoogle"
+        >
+          Disconnect
+        </button>
+      </div>
+    </template>
+
+    <hr style="border: 0; border-top: 1px solid var(--border); margin: 1.2rem 0" />
+
     <template v-if="!passphraseSet">
       <p class="muted danger-text">
         Backups are always encrypted, so nothing runs until a passphrase is set.
@@ -409,8 +550,8 @@ async function remove(dest) {
         <!-- Drive -->
         <template v-if="form.kind === 'google_drive'">
           <p class="muted danger-text" v-if="!googleConnected">
-            Google isn’t connected. Connect a service-account key under
-            <strong>Admin → Email</strong> first — Drive backups reuse that key.
+            Google isn’t connected. Add a service-account key under
+            <strong>Google connection</strong> above first.
           </p>
           <div class="row">
             <div class="field">

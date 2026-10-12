@@ -26,6 +26,10 @@ use crate::AppState;
 
 pub const SESSION_COOKIE: &str = "bb_session";
 pub const SESSION_TTL_HOURS: i64 = 12;
+/// Cookie holding an MFA trust grant — see `mfa_trust_hours` in settings and the
+/// header comment on migration 0022. Separate from the session cookie because it
+/// outlives the session and carries no authority of its own.
+pub const MFA_TRUST_COOKIE: &str = "bb_mfa_trust";
 const TOTP_ISSUER: &str = "The Blend Bar";
 
 // --- Passwords (argon2id) ---
@@ -128,8 +132,12 @@ pub fn clear_cookie() -> String {
 }
 
 pub fn read_cookie(headers: &HeaderMap) -> Option<String> {
+    read_named_cookie(headers, SESSION_COOKIE)
+}
+
+fn read_named_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     let raw = headers.get(header::COOKIE)?.to_str().ok()?;
-    let prefix = format!("{SESSION_COOKIE}=");
+    let prefix = format!("{name}=");
     raw.split(';')
         .map(str::trim)
         .find_map(|kv| kv.strip_prefix(&prefix))
@@ -138,11 +146,143 @@ pub fn read_cookie(headers: &HeaderMap) -> Option<String> {
 
 /// Attach `body` as JSON plus a `Set-Cookie` header.
 pub fn json_with_cookie(cookie: String, body: Value) -> Response {
+    json_with_cookies(vec![cookie], body)
+}
+
+/// Attach `body` as JSON plus one `Set-Cookie` header per entry. Appends rather
+/// than inserts, so the session cookie and the MFA-trust cookie can both be set
+/// on one response instead of silently overwriting each other.
+pub fn json_with_cookies(cookies: Vec<String>, body: Value) -> Response {
     let mut res = Json(body).into_response();
-    if let Ok(v) = HeaderValue::from_str(&cookie) {
-        res.headers_mut().insert(header::SET_COOKIE, v);
+    for cookie in cookies {
+        if let Ok(v) = HeaderValue::from_str(&cookie) {
+            res.headers_mut().append(header::SET_COOKIE, v);
+        }
     }
     res
+}
+
+// --- MFA trust window ---
+//
+// Once MFA has been verified on a device, a later sign-in from that same device
+// may skip the code for `settings.mfa_trust_hours`. The password is always still
+// required: these helpers are only ever reached after argon2 has passed, so the
+// cookie by itself authenticates nobody.
+
+/// The configured trust window, in hours. 0 means "always ask for MFA".
+///
+/// Read fresh on every sign-in rather than cached, because the point of the
+/// admin toggle is that turning it off stops the next sign-in, not the next
+/// deploy. A failed read is treated as 0 — if we cannot establish that skipping
+/// MFA is permitted, we ask for it.
+pub async fn trust_window_hours(db: &PgPool) -> i64 {
+    sqlx::query_scalar::<_, i32>("select mfa_trust_hours from settings where id = true")
+        .fetch_one(db)
+        .await
+        .unwrap_or(0) as i64
+}
+
+pub fn set_trust_cookie(token: &str, hours: i64) -> String {
+    format!(
+        "{MFA_TRUST_COOKIE}={token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age={}",
+        hours * 3600
+    )
+}
+
+pub fn clear_trust_cookie() -> String {
+    format!("{MFA_TRUST_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0")
+}
+
+pub fn read_trust_cookie(headers: &HeaderMap) -> Option<String> {
+    read_named_cookie(headers, MFA_TRUST_COOKIE)
+}
+
+/// Is this device still inside its MFA trust window **for this employee**?
+///
+/// Bound to `employee_id` on purpose: the stand tablet is shared, and a grant
+/// issued to one person must not wave the next person past their own second
+/// factor. The window is checked against the *current* setting as well as the
+/// row's own expiry, so shortening it (or setting it to 0) immediately shortens
+/// grants that are already out there.
+pub async fn device_trusted(db: &PgPool, headers: &HeaderMap, employee_id: Uuid) -> bool {
+    let hours = trust_window_hours(db).await;
+    if hours == 0 {
+        return false;
+    }
+    let Some(token) = read_trust_cookie(headers) else {
+        return false;
+    };
+    sqlx::query_scalar::<_, i64>(
+        "select count(*) from employee_mfa_trust \
+         where token_hash = $1 and employee_id = $2 and expires_at > now() \
+           and created_at > now() - make_interval(hours => $3)",
+    )
+    .bind(hash_token(&token))
+    .bind(employee_id)
+    .bind(hours as i32)
+    .fetch_one(db)
+    .await
+    .map(|n| n > 0)
+    .unwrap_or(false)
+}
+
+/// Issue a fresh trust grant for this device and return the cookie to set.
+/// `None` when the window is off, in which case no cookie is sent at all.
+pub async fn grant_trust(
+    db: &PgPool,
+    employee_id: Uuid,
+    user_agent: Option<&str>,
+) -> Result<Option<String>, sqlx::Error> {
+    let hours = trust_window_hours(db).await;
+    if hours == 0 {
+        return Ok(None);
+    }
+    let token = generate_session_token();
+    sqlx::query(
+        "insert into employee_mfa_trust (token_hash, employee_id, expires_at, user_agent) \
+         values ($1, $2, now() + make_interval(hours => $3), $4)",
+    )
+    .bind(hash_token(&token))
+    .bind(employee_id)
+    .bind(hours as i32)
+    .bind(user_agent)
+    .execute(db)
+    .await?;
+    // Opportunistic tidy-up. The table is tiny and only this path writes to it,
+    // so it needs no scheduled job of its own.
+    let _ = sqlx::query("delete from employee_mfa_trust where expires_at <= now()")
+        .execute(db)
+        .await;
+    Ok(Some(set_trust_cookie(&token, hours)))
+}
+
+/// Drop every trust grant for an employee, optionally sparing the one presented
+/// by the current request. Called wherever the answer to "is this still the same
+/// trusted device?" has been invalidated: password reset or change, MFA reset,
+/// deactivation.
+pub async fn revoke_trust(
+    db: &PgPool,
+    employee_id: Uuid,
+    keep_token: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    match keep_token {
+        Some(token) => {
+            sqlx::query(
+                "delete from employee_mfa_trust where employee_id = $1 and token_hash <> $2",
+            )
+            .bind(employee_id)
+            .bind(hash_token(token))
+            .execute(db)
+            .await?;
+        }
+        None => {
+            sqlx::query("delete from employee_mfa_trust where employee_id = $1")
+                .bind(employee_id)
+                .execute(db)
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 /// Load a (session, employee) pair from the cookie, if the session is unexpired
@@ -217,5 +357,69 @@ where
             return Err(AppError::Forbidden);
         }
         Ok(AdminEmployee(employee))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers_with_cookie(value: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(header::COOKIE, HeaderValue::from_str(value).unwrap());
+        h
+    }
+
+    /// Both cookies ride on the same `Cookie:` header once a device is trusted,
+    /// so each reader has to find its own. Getting this wrong would hand the
+    /// session token to the trust check (and never match), quietly making the
+    /// window do nothing.
+    #[test]
+    fn reads_each_cookie_from_a_shared_header() {
+        let h = headers_with_cookie("bb_session=sess-tok; bb_mfa_trust=trust-tok");
+        assert_eq!(read_cookie(&h).as_deref(), Some("sess-tok"));
+        assert_eq!(read_trust_cookie(&h).as_deref(), Some("trust-tok"));
+
+        // Order must not matter, and neither should a missing space.
+        let h = headers_with_cookie("bb_mfa_trust=trust-tok;bb_session=sess-tok");
+        assert_eq!(read_cookie(&h).as_deref(), Some("sess-tok"));
+        assert_eq!(read_trust_cookie(&h).as_deref(), Some("trust-tok"));
+    }
+
+    #[test]
+    fn missing_trust_cookie_reads_as_none() {
+        let h = headers_with_cookie("bb_session=sess-tok");
+        assert_eq!(read_trust_cookie(&h), None);
+        assert_eq!(read_trust_cookie(&HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn trust_cookie_is_httponly_and_expires_with_the_window() {
+        let c = set_trust_cookie("tok", 4);
+        assert!(c.starts_with("bb_mfa_trust=tok;"));
+        assert!(c.contains("HttpOnly"));
+        assert!(c.contains("Secure"));
+        assert!(c.contains("Max-Age=14400"));
+
+        assert!(clear_trust_cookie().contains("Max-Age=0"));
+    }
+
+    /// Two cookies on one response must both survive. `insert` would drop the
+    /// first, so a trusted device would never be remembered.
+    #[test]
+    fn both_cookies_survive_on_one_response() {
+        let res = json_with_cookies(
+            vec![set_cookie("sess"), set_trust_cookie("trust", 4)],
+            serde_json::json!({ "status": "ok" }),
+        );
+        let set: Vec<_> = res
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(set.len(), 2);
+        assert!(set.iter().any(|c| c.starts_with("bb_session=sess;")));
+        assert!(set.iter().any(|c| c.starts_with("bb_mfa_trust=trust;")));
     }
 }

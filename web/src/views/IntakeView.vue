@@ -14,8 +14,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import MixBuilder from '../components/MixBuilder.vue'
+import PayPanel from '../components/PayPanel.vue'
 import { api } from '../lib/api.js'
-import { BOTTLE_SIZES, ORDER_TYPES, bottleLabel, formatMl } from '../lib/bottle.js'
+import { BOTTLE_SIZES, bottleLabel, formatMl, formulaCheck, ORDER_TYPES } from '../lib/bottle.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -27,7 +28,6 @@ const bundles = ref([])
 const email = ref('')
 const name = ref('')
 const marketingConsent = ref(false)
-const scentPreferenceIds = ref([])
 
 /** Each line is one blend in one size, with a quantity. */
 const lines = ref([])
@@ -37,6 +37,11 @@ const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const result = ref(null)
+// The cart Save intake builds for this sale, ready to charge. Null if it
+// couldn't be built (cartError says why) — the intake itself is still saved.
+const cartId = ref(null)
+const cartError = ref('')
+const paid = ref(false)
 
 /// Held steady across retries so a resubmitted attempt cannot record the same
 /// intake twice; regenerated only when a fresh intake is started.
@@ -111,7 +116,8 @@ function lineIsValid(line) {
   if (line.type === 'set_perfume') return Boolean(line.scent_id)
   // A blend nobody named is one nobody can find again.
   if (!line.mixName.trim()) return false
-  return line.items.length > 0 && line.items.every((i) => Number(i.amount_ml) > 0)
+  // Must total exactly 100 ml at the base; MixBuilder shows how far off it is.
+  return formulaCheck(line.items).ok
 }
 
 const canSubmit = computed(() => {
@@ -120,12 +126,6 @@ const canSubmit = computed(() => {
   if (!lines.value.length && !bundleId.value) return false
   return lines.value.every(lineIsValid)
 })
-
-function toggleScentPreference(id) {
-  const next = new Set(scentPreferenceIds.value)
-  next.has(id) ? next.delete(id) : next.add(id)
-  scentPreferenceIds.value = [...next]
-}
 
 onMounted(async () => {
   try {
@@ -187,7 +187,6 @@ async function submit() {
       email: email.value.trim(),
       name: name.value.trim() || null,
       marketing_consent: marketingConsent.value,
-      scent_preference_ids: scentPreferenceIds.value.length ? scentPreferenceIds.value : null,
       bundle_id: bundleId.value || null,
       items: lines.value.map((line) => ({
         type: line.type,
@@ -205,6 +204,7 @@ async function submit() {
       })),
     }
     result.value = await api.submitIntake(payload, idempotencyKey.value)
+    await buildCart()
   } catch (err) {
     error.value = err.message
     if (err.status === 401) router.push({ name: 'login' })
@@ -213,14 +213,34 @@ async function submit() {
   }
 }
 
+/// Put everything just saved on a cart, so it's ready to charge without a trip
+/// to the Checkout screen. Failing here doesn't undo the intake — the orders
+/// are saved and can still be sold from Checkout.
+async function buildCart() {
+  cartId.value = null
+  cartError.value = ''
+  paid.value = false
+  try {
+    const cart = await api.createCart({
+      customer_id: result.value.customer.id,
+      order_ids: result.value.orders.map((o) => o.id),
+    })
+    cartId.value = cart.id
+  } catch (err) {
+    cartError.value = err.message
+  }
+}
+
 function startAnother() {
   email.value = ''
   name.value = ''
   marketingConsent.value = false
-  scentPreferenceIds.value = []
   lines.value = [newLine()]
   bundleId.value = ''
   result.value = null
+  cartId.value = null
+  cartError.value = ''
+  paid.value = false
   error.value = ''
   idempotencyKey.value = newKey()
   if (Object.keys(route.query).length) router.replace({ name: 'intake' })
@@ -255,22 +275,30 @@ function startAnother() {
         <span class="badge danger-badge" v-else>No price</span>
       </div>
 
-      <p class="muted" style="margin-top: 0.9rem">
-        Nothing has been charged yet. Take payment on the
+    </div>
+
+    <PayPanel
+      v-if="cartId"
+      :key="cartId"
+      :cart-id="cartId"
+      @paid="paid = true"
+      @canceled="cartId = null"
+    />
+    <div class="card" v-else>
+      <p class="danger-text" v-if="cartError">Couldn't set up payment: {{ cartError }}</p>
+      <p class="muted" style="margin: 0">
+        Nothing has been charged. Take payment from the
         <RouterLink :to="{ name: 'checkout', query: { customer: result.customer.id } }">
           Checkout
         </RouterLink>
-        screen.
+        screen when ready.
       </p>
     </div>
+
     <div class="row" style="gap: 0.5rem">
-      <button class="primary" type="button" @click="startAnother">Start another intake</button>
-      <RouterLink
-        class="ghost"
-        :to="{ name: 'checkout', query: { customer: result.customer.id } }"
-      >
-        Take payment
-      </RouterLink>
+      <button :class="paid || !cartId ? 'primary' : 'ghost'" type="button" @click="startAnother">
+        {{ paid ? 'Next customer' : 'Start another intake' }}
+      </button>
     </div>
   </template>
 
@@ -279,6 +307,10 @@ function startAnother() {
 
     <div class="card">
       <h2>Customer</h2>
+      <div class="field">
+        <label for="name">Name</label>
+        <input id="name" v-model="name" type="text" autocomplete="off" />
+      </div>
       <div class="field">
         <label for="email">Email</label>
         <input
@@ -292,29 +324,10 @@ function startAnother() {
           required
         />
       </div>
-      <div class="field">
-        <label for="name">Name</label>
-        <input id="name" v-model="name" type="text" autocomplete="off" />
-      </div>
       <label class="checkbox">
         <input type="checkbox" v-model="marketingConsent" />
         Marketing consent
       </label>
-    </div>
-
-    <div class="card" v-if="activeScents.length">
-      <h2>Scents they liked</h2>
-      <div class="chips">
-        <button
-          v-for="scent in activeScents"
-          :key="scent.id"
-          type="button"
-          :aria-pressed="scentPreferenceIds.includes(scent.id)"
-          @click="toggleScentPreference(scent.id)"
-        >
-          {{ scent.name }}
-        </button>
-      </div>
     </div>
 
     <div class="card" v-if="activeBundles.length">
@@ -476,7 +489,7 @@ function startAnother() {
       {{ busy ? 'Saving…' : 'Save intake' }}
     </button>
     <p class="muted" style="margin-top: 0.5rem; font-size: 0.88rem">
-      Saving records what was made. Payment is taken separately on the Checkout screen.
+      Saving records what was made and sets the sale up to charge — nothing is charged until you press Charge.
     </p>
   </form>
 </template>

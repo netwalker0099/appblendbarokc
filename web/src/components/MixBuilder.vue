@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 
-import { BOTTLE_SIZES, INGREDIENT_TYPES, formatMl, scaleMl, totalMl } from '../lib/bottle.js'
+import { BOTTLE_SIZES, INGREDIENT_TYPES, formatMl, formulaCheck, scaleMl, totalMl } from '../lib/bottle.js'
 
 /// Mirrors MAX_MIX_INGREDIENTS in the API. The server is still the authority —
 /// this only keeps the operator from building a mix that would be rejected.
@@ -24,6 +24,10 @@ const chosenIds = computed(() => new Set(props.modelValue.map((item) => item.ing
 const available = computed(() => activeIngredients.value.filter((i) => !chosenIds.value.has(i.id)))
 
 const atCap = computed(() => props.modelValue.length >= MAX_INGREDIENTS)
+
+/// The 100 ml rule, shown live. The screens that save a formula disable their
+/// button on the same check; the API refuses it regardless.
+const status = computed(() => formulaCheck(props.modelValue))
 
 function nameFor(id) {
   return props.ingredients.find((i) => i.id === id)?.name ?? 'Unknown ingredient'
@@ -91,7 +95,8 @@ function removeAt(index) {
     <h2>Mix builder — {{ modelValue.length }}/{{ MAX_INGREDIENTS }}</h2>
 
     <p class="muted" style="margin-top: -0.4rem">
-      Amounts are in millilitres (ml), measured at the 3.4 oz base formula.
+      Amounts are in millilitres (ml), measured at the 3.4 oz base formula, and
+      must add up to exactly 100 ml — every other bottle size is scaled from it.
     </p>
 
     <p class="muted" v-if="!activeIngredients.length">
@@ -116,7 +121,7 @@ function removeAt(index) {
         type="number"
         inputmode="decimal"
         min="0.01"
-        step="any"
+        step="0.01"
         :value="item.amount_ml"
         :aria-label="`${nameFor(item.ingredient_id)} amount in millilitres`"
         @input="setAmount(index, $event.target.value)"
@@ -126,6 +131,15 @@ function removeAt(index) {
         ×
       </button>
     </div>
+
+    <p
+      v-if="modelValue.length"
+      class="formula-status"
+      :class="status.ok ? 'ok' : 'bad'"
+      role="status"
+    >
+      {{ status.ok ? '✓ ' : '' }}{{ status.message }}
+    </p>
 
     <div class="row" v-if="available.length && !atCap">
       <div>
@@ -182,3 +196,19 @@ function removeAt(index) {
     </template>
   </div>
 </template>
+
+<style scoped>
+.formula-status {
+  margin: 0.4rem 0 0.8rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.formula-status.ok {
+  color: var(--ok);
+}
+
+.formula-status.bad {
+  color: var(--danger);
+}
+</style>

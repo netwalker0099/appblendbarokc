@@ -214,14 +214,45 @@ pub async fn cancel_cart(
     square: &dyn crate::square::Square,
     cart_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    // Read the link id before the status change, so we still know what to void.
-    let payment_link_id: Option<String> = sqlx::query_scalar(
-        "select square_payment_link_id from carts where id = $1 and status in ('open', 'pending_payment')",
+    // Read the link and Terminal ids before the status change, so we still know
+    // what to void.
+    let row: Option<(Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
+        "select square_payment_link_id, terminal_checkout_id, terminal_status from carts \
+         where id = $1 and status in ('open', 'pending_payment')",
     )
     .bind(cart_id)
     .fetch_optional(db)
-    .await?
-    .flatten();
+    .await?;
+    let (payment_link_id, terminal_checkout_id, terminal_status) = row.unwrap_or_default();
+
+    // A checkout still on a Terminal is taken off it *first*, the reverse of the
+    // payment-link order below. The customer may be tapping their card at this
+    // very moment; if Square says it's too late to cancel, the cart must not be
+    // canceled here either, or a payment would land on a canceled cart.
+    if let (Some(checkout_id), Some(status)) = (&terminal_checkout_id, &terminal_status) {
+        if crate::square::is_active_terminal_status(status) {
+            match square.cancel_terminal_checkout(checkout_id).await {
+                Ok(checkout) => {
+                    sqlx::query(
+                        "update carts set terminal_status = $2, terminal_cancel_reason = $3 \
+                         where id = $1",
+                    )
+                    .bind(cart_id)
+                    .bind(&checkout.status)
+                    .bind(&checkout.cancel_reason)
+                    .execute(db)
+                    .await?;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        %cart_id, %checkout_id,
+                        "not canceling the cart: its Terminal checkout could not be canceled: {e}"
+                    );
+                    return Ok(false);
+                }
+            }
+        }
+    }
 
     let mut tx = db.begin().await?;
 
@@ -259,14 +290,14 @@ pub async fn cancel_cart(
     // Give the coupon back — it was held against a cart that never paid.
     crate::referrals::release_coupon(&mut tx, cart_id).await?;
 
-    // An order raised by the public share page exists only because someone
-    // clicked Buy; if they never paid, nothing was ever made and the row is
-    // noise — worse, it would sit on that email's account as an order they
-    // never placed. Orders taken at the bar are left alone: those blends
-    // physically exist whether or not this particular cart was paid.
+    // An order raised by the public share page or the online shop exists only
+    // because someone clicked Buy; if they never paid, nothing was ever made
+    // and the row is noise — worse, it would sit on that email's account as an
+    // order they never placed. Orders taken at the bar are left alone: those
+    // blends physically exist whether or not this particular cart was paid.
     if !released.is_empty() {
         sqlx::query(
-            "delete from orders where id = any($1) and external_ref = 'public_share' \
+            "delete from orders where id = any($1) and external_ref in ('public_share', 'public_shop') \
              and status = 'lead'",
         )
         .bind(&released)
@@ -294,11 +325,10 @@ pub async fn cancel_cart(
     Ok(true)
 }
 
-/// Expire payment links that were never used. Called by the background worker.
+/// Expire checkouts that were never paid. Called by the background worker.
 ///
-/// Without this, an abandoned checkout holds its orders indefinitely and the
-/// reconciliation report accumulates permanent "awaiting payment" noise that
-/// buries the discrepancies worth looking at.
+/// Without this, an abandoned checkout holds its orders indefinitely, so those
+/// blends could never be put on another cart.
 pub async fn expire_stale_checkouts(
     db: &PgPool,
     square: &dyn crate::square::Square,

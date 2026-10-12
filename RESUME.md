@@ -1,6 +1,19 @@
 # Blend Bar — Resume Notes
 
-Last updated: 2026-10-01 — **Square is connected, in Sandbox** (Milestone 15
+2026-10-08 — **Square Terminal payments built and deployed; Reconciliation
+removed** (Milestone 17 below). Save intake builds the cart; "Charge on Terminal"
+sends it to a Square Terminal via the cloud Terminal API and the screen flips to
+Paid by itself. Verified end to end against Square Sandbox test devices. Waiting
+on: a physical Terminal, and OAuth (see TODO).
+
+2026-10-05 — **the online shop is built and deployed** (Milestone 16 below):
+Admin → Shop to add, hide, reorder and remove listings; `/shop` on the
+**sandbox** site with a bag and Square checkout that collects a shipping
+address. Shop checkout is held off exactly like share-link checkout until
+`SQUARE_ENV=production`. **Production (`site-prod/`) does not have it yet** —
+it arrives with the next `rsync` promotion.
+
+Previously: 2026-10-01 — **Square is connected, in Sandbox** (Milestone 15
 below). The sandbox token and location are in `.env`, the live HTTP client made its
 first real requests, and a $1.00 staff checkout was paid with a test card and
 verified field-by-field against Square. Public checkout from share links is now
@@ -940,7 +953,166 @@ In order:
    one real small payment, refund it. Public checkout turns on at this point —
    test a share-link purchase then.
 
-Also still open, independent of Square: the **"Shop Now" link** (TODO.md).
+The **"Shop Now" link** is fixed on the sandbox site (it goes to `/shop`); the
+production site picks it up when `site/` is promoted. See Milestone 16.
+
+## Milestone 17: Square Terminal payments (2026-10-08)
+
+**Why.** The owner wants to take in-person card payments from the intake screen
+without going into Square. The cloud **Terminal API** does exactly that, from any
+browser: this server asks Square to put a checkout on a paired Square Terminal;
+the customer taps/inserts there. The owner's assumption that this needs an iPad
+(app-switching) was wrong, and was corrected: app-switch is Square's *POS API*,
+which drives the Square POS app and a Reader; the Terminal API drives a Terminal
+over the network and works from a laptop. **A Square Reader (puck) cannot be used
+by a web app at all** — it needs Square's POS app or a native Mobile Payments SDK
+app. So: buy a Square Terminal.
+
+**What changed.**
+- Migration `0025_square_terminal.sql`: `square_terminals` (pairing codes, device
+  ids, one default); `carts.payment_method` (`link`|`terminal`) and
+  `terminal_checkout_id/_device_id/_status/_cancel_reason`. Comment on
+  `reconciliation_runs` marking it retired (kept, not dropped).
+- `square` trait: `create_order`, `create_terminal_checkout`,
+  `get_terminal_checkout`, `cancel_terminal_checkout`, `create_device_code`,
+  `get_device_code`; `list_payments` removed. Live client and mock both
+  implement them; the Square order body is shared with payment links.
+- `routes/terminal.rs`: charge / status (poll) / cancel for a cart, and Terminal
+  pairing/management. `sync_checkout` is the single place a checkout's state is
+  pulled in and the cart settled — the poll and the `terminal.checkout.*` webhook
+  both call it. `device.code.*` webhooks finish pairing.
+- `billing::cancel_cart` cancels an active Terminal checkout **before** canceling
+  locally, and refuses if Square won't (the customer may be paying).
+- Reconciliation removed: `routes/reconciliation.rs`, its routes, the
+  `ReconciliationRun` model, the Admin card and API calls. `GET /api/square/status`
+  moved to `routes/square_status.rs` and now reports Terminals.
+- UI: `PayPanel.vue` (Terminal first, link/QR fallback, live status, cancel) used
+  by **Intake** — Save now also builds the cart — and **Checkout** ("Continue to
+  payment"). `TerminalManager.vue` in Admin → Billing (pair by code, default,
+  remove; Sandbox test devices only while on Sandbox).
+- No official Square SDK: there is none for Rust, and the app already talks to
+  Square's REST API directly in `square/http.rs`, which is what the SDKs wrap.
+
+**Verified (2026-10-08)**, on a scratch database with the new image and the real
+Sandbox credentials: Square issued a pairing code; approved sale (cart → paid,
+order → paid, $20 collected); double-press returns the same checkout; buyer
+cancels → re-send on the same Square order → paid (tip device: tip stays in
+Square, cart records $20); offline device → cancel on Terminal → cancel sale;
+cancel sale while on the Terminal; no-Terminal error; link fallback; link and
+Terminal can't both be used on one cart. 35/35. Separately, a signed
+`terminal.checkout.updated` webhook settled a cart with no polling, and a forged
+one got 401. 149 unit tests pass. **Not yet seen:** the screens in a real
+browser, a physical Terminal, and production.
+
+**Permissions** — the owner asked for exactly ORDERS_WRITE, ORDERS_READ,
+PAYMENTS_WRITE (+ optional ITEMS_READ). That set **cannot work**: reading a
+Terminal checkout's status and the payment it produced needs `PAYMENTS_READ`,
+and pairing needs `DEVICE_CREDENTIAL_MANAGEMENT`. Contact sync needs
+`CUSTOMERS_READ/WRITE`. `ITEMS_READ` is unnecessary (prices are ours). Full table
+in README → "Square permissions". None of these touch bank accounts or payouts.
+
+## Milestone 16: the online shop (2026-10-05)
+
+Replaces the old Squarespace store. The owner chose: sell **both** standalone
+products and catalogue scents, and **ship** every order.
+
+**Data** (`migrations/0024_shop.sql`). `shop_products` holds both kinds in one
+ordered list. A *product* has its own `price`; a *scent* listing points at
+`scents` and has **no price of its own** — checkout reads the scent's per-size
+prices, so the Catalog stays the only place a scent is priced. One live listing
+per scent (partial unique index). Photos are `bytea` in `shop_images`, on
+purpose: they belong in every backup with the products that use them.
+`cart_items` gained `shop_product_id` and a new `kind = 'product'`; `settings`
+gained a flat shipping charge and an optional free-shipping threshold.
+
+**API** (`routes/shop.rs`). Admin-only: `GET/POST /api/shop/products`,
+`PATCH/DELETE /api/shop/products/:id`, `PUT /api/shop/products/order`,
+`POST /api/shop/images` (raw body, 5MB, format sniffed from the bytes — the
+browser's Content-Type is ignored, and SVG is refused), `GET/PUT
+/api/shop/settings`. Public: `GET /api/public/shop`, `GET
+/api/public/shop/images/:id` (immutable cache), `POST /api/public/shop/checkout`.
+
+- **Remove always removes.** A listing never put on a cart is deleted (and its
+  photo with it); one that was is archived, so sales history keeps a valid
+  reference. Both vanish from the shop and the admin list.
+- **Checkout follows the share-page rules point for point**: server-side
+  pricing only, existing customers never modified, no marketing opt-in, the
+  same per-IP limiter (10 per 5 min, shared with share links), and the same
+  production-only guard — now `public::public_checkout_live` /
+  `ensure_public_checkout_live`, shared by both. Limits: 20 lines, 10 per line,
+  30 items per bag.
+- Each scent **bottle** becomes its own `lead` order (`external_ref =
+  'public_shop'`) and its own cart line, because a line can claim one order.
+  Products are plain lines. Shipping is a `fee` line. A coupon applies to the
+  whole total; referral codes are a share-link thing and not offered here.
+- **Square is asked for a shipping address** (`CheckoutPush.ask_for_shipping_address`,
+  new; every other caller passes `false`). The address lives on the Square
+  order — **this app does not store it**; staff read it in the Square dashboard.
+- **If Square refuses the link**, the cart is cancelled on the spot
+  (`billing::cancel_cart`), which returns the coupon and deletes the lead
+  orders. The share page does not do this yet; it leaves an `open` cart.
+- Paid shop carts have no `created_by`, so they fire the existing **"online
+  sale"** chat notification with no extra work.
+
+**Admin UI**: Admin → **Shop** tab (`components/ShopManager.vue`) for shipping,
+the listing list (thumbnail, price, units sold on paid carts, ↑/↓, Edit,
+Hide/Show, Sold out/In stock, Remove) and the add/edit form with photo upload.
+It warns when a scent listing is switched on but the shop hides it (scent
+inactive, or no prices in the Catalog). Since 2026-10-05 the form for a scent listing also
+has **a price box for each size**. Those prices are written to the scent itself
+(`PATCH /api/scents/:id` with `prices`), so they are the same numbers Catalog
+and Intake use. There is still only one price per scent per size; it just
+has two places to edit it. Each row shows the sizes a scent is sold in, and
+notes when there's only one.
+
+**Customer site** (`site/` only): `shop.html` + `shop.js` + a shop block at the
+end of `styles.css`. `/shop` is a grid of cards, each linking to the item's own
+page at `/shop/<listing id>` (Caddy rewrites `/shop/*` to `shop.html`, as `/s/*`
+is to `share.html`). A scent's page has "Select your size" with each size and
+its price, a quantity and Add to bag. Nothing is pre-selected unless the scent
+has only one size, and the button stays disabled until a size is picked.
+Products get the same page without the size picker. The bag is in `localStorage` (`blendbar.bag.v1`) and holds
+ids, sizes and quantities, never prices. `thanks.js` empties it when Square
+returns to `/thanks?from=shop`, and changes the copy from "collect" to "ship".
+The homepage's Shop links now go to `/shop`. While checkout is off the page
+still lists everything and says online checkout opens soon.
+
+**Verified** in an isolated scratch stack (its own Postgres, the new API
+image, `SQUARE_ENV=production` with a deliberately invalid token, so every
+database write ran and Square answered 401): 56 API checks covering validation,
+photos, ordering, visibility, removal/archiving, rate limiting, and the
+cancellation of failed carts; 14 checks of `shop.js` in jsdom (bag maths,
+shipping, persistence, the 503 fallback); 141 unit tests. **Not yet seen in a
+real browser, and the Square hosted page with shipping has not been exercised**
+— that needs production credentials (or a temporary sandbox-only bypass).
+
+## 2026-10-05: formulas must total 100 ml; 1 oz and Spray renamed
+
+Every formula must total **exactly 100 ml** at the 3.4 oz base, which fills
+every bottle exactly (Vintage 100, 3.4 oz 100, 1.7 oz 50, 1 oz 30, Roller 10,
+Spray 10). The owner chose to apply it to **house scents and custom blends**.
+One check, `models::mix::check_formula_total`, is called from all three write
+paths: scent formulas (`scents.rs`; an *empty* formula is still allowed),
+intake custom blends (`intake.rs`) and blend edits (`mixes.rs`). It also refuses
+amounts finer than 0.01 ml, because the column is `numeric(6,2)` and 33.333 ×3
+would pass and then be stored as 99.99. The screens use `formulaCheck` in
+`bottle.js`: `MixBuilder` shows the running total and how much to add or
+remove, and the Save buttons on Catalog, Intake and Lookup stay disabled until
+the formula adds up.
+
+**Existing data is untouched.** At the time, 45 of 51 saved customer blends and
+the one house formula ("Golden Hour (example)", 4 ml) did not total 100 ml.
+They still display and reorder as before. The rule bites only when one is
+edited and saved.
+
+**Sizes:** "1.2 oz" is now **"1 oz"** with a factor of 0.3 (it was 1.2/3.4,
+which poured 35.3 ml), and "Spray (10 ml)" is now **"Spray"**. The stored code
+stays `oz1_2`, because orders, packages and price columns hold it, so no
+migration was needed. Labels were changed in the API, the email copy, the
+operator app, and `share.js` / `portal/app.js` in **both** `site/` and
+`site-prod/`. The last was a deliberate label-only exception to "production
+changes only by promotion", so customers stop seeing a bottle size that no
+longer exists.
 
 ## Not started
 

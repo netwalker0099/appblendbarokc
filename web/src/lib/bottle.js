@@ -1,15 +1,30 @@
-/// Mix amounts are always stored as the 3.4oz base formula. The 1.7oz bottle is
-/// half of that; the roller and the spray are a tenth — derived here at display
-/// time, never stored per size. Mirrors the note on `MixItem` in the API.
+/// Mix amounts are always stored as the 3.4oz base formula; every other size is
+/// derived here at display time, never stored per size. Mirrors the note on
+/// `MixItem` in the API.
 ///
-/// Roller and spray share a factor because both are 10 ml; they differ only in
-/// the closure (rollerball vs atomiser) and in price. If that ever stops being
-/// true they need separate factors here *and* in the API's `BottleSize`.
+/// Two pairs share a factor because they hold the same volume and so take the
+/// same pour, differing only in the bottle and the price:
+///
+///   * **Vintage / 3.4 oz** — both 100 ml; a vintage-style bottle vs the standard.
+///   * **Roller / Spray** — both 10 ml; a rollerball vs an atomiser.
+///
+/// If either pair ever stops being the same volume they need separate factors
+/// here *and* in the API's `BottleSize`.
+///
+/// Every factor is the bottle's volume over the 100 ml base, so a formula that
+/// totals BASE_FORMULA_ML fills every bottle exactly: 100 / 100 / 50 / 30 / 10
+/// / 10 ml.
+///
+/// Order is largest bottle first, and it is the order the operator UI offers.
 export const BOTTLE_SIZES = [
+  { value: 'vintage', label: 'Vintage', factor: 1 },
   { value: 'oz3_4', label: '3.4 oz', factor: 1 },
   { value: 'oz1_7', label: '1.7 oz', factor: 0.5 },
+  // 30 ml. Was a 1.2 oz bottle (factor 1.2/3.4) until 2026-10-05; the code
+  // `oz1_2` is kept because orders, packages and prices already store it.
+  { value: 'oz1_2', label: '1 oz', factor: 0.3 },
   { value: 'roller', label: 'Roller', factor: 0.1 },
-  { value: 'spray', label: 'Spray (10 ml)', factor: 0.1 },
+  { value: 'spray', label: 'Spray', factor: 0.1 },
 ]
 
 export const ORDER_TYPES = [
@@ -63,4 +78,39 @@ export function formatMl(value) {
 
 export function totalMl(items, size = 'oz3_4') {
   return items.reduce((sum, item) => sum + scaleMl(item.amount_ml, size), 0)
+}
+
+/// What every formula must total at the 3.4 oz base. Mirrors BASE_FORMULA_ML in
+/// the API, which refuses anything else — this only says so before saving.
+export const BASE_FORMULA_ML = 100
+
+/// Where a formula stands against BASE_FORMULA_ML: { ok, total, message }.
+/// Worked in hundredths of a ml — the precision amounts are stored at — so
+/// 33.3 + 33.3 + 33.4 isn't let down by float rounding, and an amount finer
+/// than 0.01 ml (which the API refuses) is caught here first.
+export function formulaCheck(items) {
+  if (!items.length) return { ok: false, total: 0, message: 'Add ingredients totalling 100 ml.' }
+  let hundredths = 0
+  for (const item of items) {
+    const n = Number(item.amount_ml)
+    if (item.amount_ml === '' || !Number.isFinite(n) || n <= 0) {
+      return { ok: false, total: null, message: 'Every ingredient needs an amount above 0.' }
+    }
+    const h = Math.round(n * 100)
+    if (Math.abs(n * 100 - h) > 1e-6) {
+      return { ok: false, total: null, message: 'Amounts can be measured to 0.01 ml at most.' }
+    }
+    hundredths += h
+  }
+  const total = hundredths / 100
+  const gap = (BASE_FORMULA_ML * 100 - hundredths) / 100
+  if (gap === 0) return { ok: true, total, message: `Adds up to ${BASE_FORMULA_ML} ml.` }
+  return {
+    ok: false,
+    total,
+    message:
+      gap > 0
+        ? `Totals ${formatMl(total)} ml — add ${formatMl(gap)} ml to reach ${BASE_FORMULA_ML} ml.`
+        : `Totals ${formatMl(total)} ml — remove ${formatMl(-gap)} ml to get down to ${BASE_FORMULA_ML} ml.`,
+  }
 }

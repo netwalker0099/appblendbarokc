@@ -9,6 +9,7 @@
     <meta name="robots" content="noindex" />
     <link rel="icon" type="image/webp" href="/assets/img1.webp" />
     <link rel="stylesheet" href="/styles.css" />
+    <script src="/thanks.js" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -31,11 +32,11 @@
         <p>Payment received. Square has emailed your receipt.</p>
         <!-- These blends are hand-made by staff, not picked off a shelf. Saying
              so here prevents the "where's my tracking number?" email. -->
-        <p class="muted">
+        <p class="muted" id="thanksDetail">
           Blends are mixed by hand, so yours isn&rsquo;t off the shelf. We&rsquo;ll
           email you when it&rsquo;s ready to collect.
         </p>
-        <a class="btn solid" href="/portal">View your blends</a>
+        <a class="btn solid" href="/portal" id="thanksAction">View your blends</a>
         <p class="muted share-foot">
           Questions? Message
           <a href="https://www.instagram.com/theblendbar.okc" rel="noopener">@theblendbar.okc</a>.

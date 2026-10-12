@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue'
 
 import MixBuilder from '../components/MixBuilder.vue'
 import { api } from '../lib/api.js'
-import { bottleLabel, formatMl, totalMl } from '../lib/bottle.js'
+import { bottleLabel, formatMl, formulaCheck, totalMl } from '../lib/bottle.js'
 import { isAdmin } from '../lib/auth.js'
 
 const query = ref('')
@@ -319,7 +319,7 @@ function formatDate(value) {
               class="primary"
               type="button"
               style="margin-top: 0.7rem"
-              :disabled="savingMix"
+              :disabled="savingMix || !formulaCheck(editItems).ok"
               @click="saveMix"
             >
               {{ savingMix ? 'Saving…' : 'Save blend' }}

@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Book an Event — The Blend Bar</title>
+    <meta
+      name="description"
+      content="Tell us about your event and The Blend Bar will bring the art of custom fragrance blending directly to you."
+    />
+    <link rel="icon" type="image/webp" href="/assets/img1.webp" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="/" aria-label="The Blend Bar home">
+          <img src="/assets/img1.webp" alt="The Blend Bar monogram" />
+          <span class="name">The Blend Bar</span>
+        </a>
+        <nav class="nav" aria-label="Primary">
+          <div class="actions"><a class="btn ghost" href="/">Home</a></div>
+        </nav>
+      </div>
+    </header>
+
+    <main class="portal-wrap book-wrap">
+      <p class="eyebrow">Private &amp; Corporate</p>
+      <h1>Book an Event</h1>
+      <p class="muted">
+        Tell us a little about your occasion and we&rsquo;ll be in touch to plan
+        the details. Every field helps us come prepared.
+      </p>
+
+      <form id="bookForm" class="buy-form book-form" novalidate>
+        <div class="book-row">
+          <label class="field">
+            <span>First name</span>
+            <input
+              id="firstName"
+              name="first_name"
+              type="text"
+              autocomplete="given-name"
+              maxlength="80"
+              required
+            />
+          </label>
+          <label class="field">
+            <span>Last name</span>
+            <input
+              id="lastName"
+              name="last_name"
+              type="text"
+              autocomplete="family-name"
+              maxlength="80"
+              required
+            />
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Email</span>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autocomplete="email"
+            maxlength="200"
+            required
+          />
+        </label>
+
+        <label class="field">
+          <span>Phone number</span>
+          <input
+            id="phone"
+            name="phone"
+            type="tel"
+            autocomplete="tel"
+            maxlength="40"
+            required
+          />
+        </label>
+
+        <label class="field">
+          <span>Event date</span>
+          <input id="eventDate" name="event_date" type="date" required />
+          <em class="field-hint">If the date isn&rsquo;t settled yet, give us your best guess.</em>
+        </label>
+
+        <label class="field">
+          <span>Event details</span>
+          <textarea
+            id="details"
+            name="details"
+            class="book-textarea"
+            rows="5"
+            maxlength="2000"
+            placeholder="Type of occasion, guest count, location, and anything else we should know."
+            required
+          ></textarea>
+        </label>
+
+        <!-- Honeypot. Hidden from people, irresistible to naive bots; a filled
+             value means the submission is discarded. Not a substitute for the
+             server-side check — see book.js. -->
+        <div class="book-hp" aria-hidden="true">
+          <label for="company">Company (leave blank)</label>
+          <input id="company" name="company" type="text" tabindex="-1" autocomplete="off" />
+        </div>
+
+        <div class="field book-captcha">
+          <span id="captchaLabel">Spam check</span>
+          <div class="book-captcha-row">
+            <p class="book-captcha-q" id="captchaQuestion">Loading…</p>
+            <input
+              id="captchaAnswer"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="4"
+              aria-labelledby="captchaLabel captchaQuestion"
+              required
+            />
+            <button class="btn ghost book-captcha-new" type="button" id="captchaNew">
+              New question
+            </button>
+          </div>
+        </div>
+
+        <p class="error-text" id="formError" hidden></p>
+
+        <button class="btn solid" type="submit" id="submitBtn">Submit request</button>
+      </form>
+
+      <div id="bookResult" hidden></div>
+    </main>
+
+    <script src="/book.js"></script>
+  </body>
+</html>

@@ -34,8 +34,10 @@ where
                 return Ok(None);
             };
             let column = match size {
+                BottleSize::Vintage => "price_vintage",
                 BottleSize::Oz3_4 => "price_oz3_4",
                 BottleSize::Oz1_7 => "price_oz1_7",
+                BottleSize::Oz1_2 => "price_oz1_2",
                 BottleSize::Roller => "price_roller",
                 BottleSize::Spray => "price_spray",
             };
@@ -49,8 +51,10 @@ where
         // whatever goes in the bottle — so the price is global, not per mix.
         OrderType::CustomMix => {
             let column = match size {
+                BottleSize::Vintage => "custom_price_vintage",
                 BottleSize::Oz3_4 => "custom_price_oz3_4",
                 BottleSize::Oz1_7 => "custom_price_oz1_7",
+                BottleSize::Oz1_2 => "custom_price_oz1_2",
                 BottleSize::Roller => "custom_price_roller",
                 BottleSize::Spray => "custom_price_spray",
             };

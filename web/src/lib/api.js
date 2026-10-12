@@ -68,6 +68,17 @@ export const api = {
   updateBundle: (id, body) => request(`/bundles/${id}`, { method: 'PATCH', body }),
   deleteBundle: (id) => request(`/bundles/${id}`, { method: 'DELETE' }),
 
+  // --- online shop (Admin → Shop) ---
+  listShopProducts: () => request('/shop/products'),
+  createShopProduct: (body) => request('/shop/products', { method: 'POST', body }),
+  updateShopProduct: (id, body) => request(`/shop/products/${id}`, { method: 'PATCH', body }),
+  // Deletes a listing never sold; archives one that was, so its sales keep
+  // their history. Resolves to { archived }.
+  removeShopProduct: (id) => request(`/shop/products/${id}`, { method: 'DELETE' }),
+  reorderShopProducts: (ids) => request('/shop/products/order', { method: 'PUT', body: { ids } }),
+  getShopSettings: () => request('/shop/settings'),
+  updateShopSettings: (body) => request('/shop/settings', { method: 'PUT', body }),
+
   // --- admin deletion ---
   // POST rather than DELETE so the intent reads as deliberate in logs and
   // proxies; each refuses to remove anything money has touched.
@@ -95,17 +106,29 @@ export const api = {
   refreshCart: (id) => request(`/carts/${id}/refresh`, { method: 'POST' }),
   cancelCart: (id) => request(`/carts/${id}/cancel`, { method: 'POST' }),
 
+  // --- Square Terminal ---
+  // Send the cart to the Terminal (the default one unless terminalId is given).
+  // Safe to repeat: while a checkout is still on the device it is returned as is.
+  chargeOnTerminal: (cartId, terminalId = null) =>
+    request(`/carts/${cartId}/terminal`, {
+      method: 'POST',
+      body: terminalId ? { terminal_id: terminalId } : {},
+    }),
+  // The cart with its Terminal state brought up to date from Square — polled
+  // while the customer pays; settles the cart when the payment lands.
+  terminalStatus: (cartId) => request(`/carts/${cartId}/terminal`),
+  cancelOnTerminal: (cartId) => request(`/carts/${cartId}/terminal/cancel`, { method: 'POST' }),
+  listTerminals: () => request('/square/terminals'),
+  pairTerminal: (name) => request('/square/terminals/pair', { method: 'POST', body: { name } }),
+  addTerminalById: (name, device_id) =>
+    request('/square/terminals', { method: 'POST', body: { name, device_id } }),
+  // Polled while a pairing code is showing; flips to paired once it's used.
+  checkTerminal: (id) => request(`/square/terminals/${id}`),
+  updateTerminal: (id, patch) => request(`/square/terminals/${id}`, { method: 'PATCH', body: patch }),
+  removeTerminal: (id) => request(`/square/terminals/${id}`, { method: 'DELETE' }),
+
   // --- Square integration (admin) ---
   getSquareStatus: () => request('/square/status'),
-  reconcile: ({ from, to, save = false } = {}) => {
-    const q = new URLSearchParams()
-    if (from) q.set('from', from)
-    if (to) q.set('to', to)
-    if (save) q.set('save', 'true')
-    const qs = q.toString()
-    return request(`/square/reconcile${qs ? `?${qs}` : ''}`)
-  },
-  reconcileHistory: () => request('/square/reconcile/history'),
   listSquareEvents: () => request('/square/events'),
 
   // --- Chat notifications for customer-triggered events (admin) ---
@@ -137,8 +160,10 @@ export const api = {
   listEmailDeliveries: () => request('/email/recent'),
   // The key is written to a file server-side and never returned; responses carry
   // only the service-account address.
-  connectGoogle: (body) => request('/email/google', { method: 'POST', body }),
-  disconnectGoogle: () => request('/email/google', { method: 'DELETE' }),
+  // The Google key belongs to Drive backups — email sends through the Workspace
+  // relay, which authorises this server by IP and needs no credential.
+  connectGoogle: (body) => request('/admin/backup/google', { method: 'POST', body }),
+  disconnectGoogle: () => request('/admin/backup/google', { method: 'DELETE' }),
 
   // --- scheduled backups (admin) ---
   // The passphrase is write-only: it can be set, never read back. `status` says
@@ -202,6 +227,30 @@ export const api = {
       body,
       headers: { 'Idempotency-Key': idempotencyKey },
     }),
+}
+
+/// Uploads a product photo. Raw bytes, not JSON, so it bypasses `request()`.
+/// The server identifies the format from the file itself; the type sent here is
+/// only a courtesy. Resolves to { id, url }.
+export async function uploadShopImage(file) {
+  const res = await fetch('/api/shop/images', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  })
+  let payload = null
+  try {
+    payload = await res.json()
+  } catch {
+    // Empty or non-JSON body (a proxy's 413, say); fall through to the status.
+  }
+  if (!res.ok) {
+    if (res.status === 401) onUnauthorized()
+    if (res.status === 413) throw new ApiError('That photo is too large — please use one under 5MB.', 413)
+    throw new ApiError(payload?.error || `upload failed (${res.status})`, res.status)
+  }
+  return payload
 }
 
 /// Uploads a backup file. Raw bytes, not JSON, so it bypasses `request()`.

@@ -76,6 +76,10 @@ struct EventIds {
     event_type: String,
     payment_id: Option<String>,
     order_id: Option<String>,
+    /// `terminal.checkout.*` events.
+    terminal_checkout_id: Option<String>,
+    /// `device.code.*` events.
+    device_code_id: Option<String>,
 }
 
 fn extract_ids(v: &Value) -> Option<EventIds> {
@@ -100,11 +104,21 @@ fn extract_ids(v: &Value) -> Option<EventIds> {
         .and_then(Value::as_str)
         .map(str::to_string);
 
+    let nested_id = |key: &str| {
+        object
+            .and_then(|o| o.get(key))
+            .and_then(|c| c.get("id"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+
     Some(EventIds {
         event_id,
         event_type,
         payment_id,
         order_id,
+        terminal_checkout_id: nested_id("checkout"),
+        device_code_id: nested_id("device_code"),
     })
 }
 
@@ -208,6 +222,42 @@ pub async fn receive(
     .execute(&state.db)
     .await?;
 
+    // A Terminal checkout changed (the customer paid, canceled, or it timed
+    // out). Re-fetched and settled by the same code the checkout screen polls.
+    if ids.event_type.starts_with("terminal.checkout.") {
+        let Some(checkout_id) = ids.terminal_checkout_id.as_deref() else {
+            settle(&state, &ids.event_id, "failed", None, Some("terminal event without a checkout id")).await?;
+            return Ok(StatusCode::OK);
+        };
+        return match crate::routes::terminal::sync_checkout(&state, checkout_id).await {
+            Ok(Some(cart_id)) => {
+                settle(&state, &ids.event_id, "processed", Some(cart_id), None).await?;
+                Ok(StatusCode::OK)
+            }
+            Ok(None) => {
+                settle(&state, &ids.event_id, "unmatched", None, None).await?;
+                Ok(StatusCode::OK)
+            }
+            Err(e) => {
+                let msg = format!("{e:?}");
+                settle(&state, &ids.event_id, "failed", None, Some(&msg)).await?;
+                // 500 so Square redelivers.
+                Err(AppError::Internal(msg))
+            }
+        };
+    }
+
+    // A Terminal was signed in with one of our pairing codes.
+    if ids.event_type.starts_with("device.code.") {
+        let matched = match ids.device_code_id.as_deref() {
+            Some(code_id) => crate::routes::terminal::on_device_code_event(&state, code_id).await?,
+            None => false,
+        };
+        settle(&state, &ids.event_id, if matched { "processed" } else { "unmatched" }, None, None)
+            .await?;
+        return Ok(StatusCode::OK);
+    }
+
     // Only payment and refund events move money. Everything else is acked and
     // filed — acking matters, or Square retries it forever.
     let relevant = ids.event_type.starts_with("payment.") || ids.event_type.starts_with("refund.");
@@ -254,12 +304,11 @@ pub async fn receive(
     match billing::apply_payment(&state.db, &payment).await? {
         Some((cart_id, outcome)) => {
             settle(&state, &ids.event_id, "processed", Some(cart_id), None).await?;
-            tracing::info!(%cart_id, ?outcome, "square webhook reconciled a cart");
+            tracing::info!(%cart_id, ?outcome, "square webhook settled a cart");
         }
         None => {
             // A sale rung up directly in the Square POS with no cart here. Kept
-            // for the record and surfaced by reconciliation as "in Square only";
-            // not an error.
+            // for the record; not an error.
             settle(&state, &ids.event_id, "unmatched", None, None).await?;
             tracing::info!(payment_id, "square payment has no local cart");
         }
@@ -375,6 +424,24 @@ mod tests {
         });
         let ids = extract_ids(&v).unwrap();
         assert_eq!(ids.payment_id.as_deref(), Some("pay_9"));
+    }
+
+    #[test]
+    fn extracts_terminal_and_device_code_ids() {
+        let v = serde_json::json!({
+            "event_id": "ev_t", "type": "terminal.checkout.updated",
+            "data": { "type": "checkout", "id": "tc_1",
+                      "object": { "checkout": { "id": "tc_1", "status": "COMPLETED" } } }
+        });
+        let ids = extract_ids(&v).unwrap();
+        assert_eq!(ids.terminal_checkout_id.as_deref(), Some("tc_1"));
+        assert!(ids.payment_id.is_none());
+
+        let v = serde_json::json!({
+            "event_id": "ev_d", "type": "device.code.paired",
+            "data": { "object": { "device_code": { "id": "dc_1", "status": "PAIRED" } } }
+        });
+        assert_eq!(extract_ids(&v).unwrap().device_code_id.as_deref(), Some("dc_1"));
     }
 
     #[test]

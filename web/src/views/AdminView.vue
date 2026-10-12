@@ -11,8 +11,10 @@ import EmailManager from '../components/EmailManager.vue'
 import EventEnquiries from '../components/EventEnquiries.vue'
 import NotificationManager from '../components/NotificationManager.vue'
 import ScentManager from '../components/ScentManager.vue'
+import ShopManager from '../components/ShopManager.vue'
 import TeamManager from '../components/TeamManager.vue'
-import { INGREDIENT_TYPES } from '../lib/bottle.js'
+import TerminalManager from '../components/TerminalManager.vue'
+import { BOTTLE_SIZES, INGREDIENT_TYPES } from '../lib/bottle.js'
 import { api, downloadBackup } from '../lib/api.js'
 import { currentUser } from '../lib/auth.js'
 
@@ -31,6 +33,7 @@ const route = useRoute()
 const TABS = [
   { id: 'catalog', label: 'Catalog' },
   { id: 'pricing', label: 'Pricing & packages' },
+  { id: 'shop', label: 'Shop' },
   { id: 'team', label: 'Team' },
   { id: 'billing', label: 'Billing' },
   { id: 'alerts', label: 'Notifications' },
@@ -109,16 +112,6 @@ const emailDeliveries = ref([])
 const backupStatus = ref(null)
 const backupDestinations = ref([])
 const backupRuns = ref([])
-const report = ref(null)
-const reconciling = ref(false)
-// Default the reconciliation window to the last 7 days, as YYYY-MM-DD.
-const range = reactive({ from: isoDaysAgo(7), to: isoDaysAgo(0) })
-
-function isoDaysAgo(n) {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return d.toISOString().slice(0, 10)
-}
 const referral = reactive({
   referral_enabled: false,
   referral_discount_cents: 500,
@@ -149,12 +142,40 @@ async function saveReferral() {
   }
 }
 
-const CUSTOM_PRICE_KEYS = [
-  'custom_price_oz3_4',
-  'custom_price_oz1_7',
-  'custom_price_roller',
-  'custom_price_spray',
-]
+/**
+ * How long a device stays trusted after MFA. Kept separate from the referral
+ * form so saving one can't quietly rewrite the other — this is the security
+ * setting on the page, and it should only ever change when somebody pressed the
+ * button under it.
+ */
+const security = reactive({ mfa_trust_hours: 4 })
+const savingSecurity = ref(false)
+
+async function saveSecurity() {
+  savingSecurity.value = true
+  try {
+    const hours = Number(security.mfa_trust_hours)
+    if (!Number.isInteger(hours) || hours < 0 || hours > 168) {
+      throw new Error('Enter a whole number of hours between 0 and 168.')
+    }
+    const set = await api.updateSettings({ mfa_trust_hours: hours })
+    security.mfa_trust_hours = set.mfa_trust_hours
+    flash(
+      hours === 0
+        ? 'Saved — MFA is now required on every sign-in.'
+        : `Saved — MFA won't be asked for again on a device for ${hours} hour${hours === 1 ? '' : 's'}.`,
+    )
+  } catch (err) {
+    handle(err)
+  } finally {
+    savingSecurity.value = false
+  }
+}
+
+// Derived from BOTTLE_SIZES rather than listed by hand, so adding a size is one
+// edit in bottle.js instead of a hunt for every place that enumerates them —
+// and a size can never end up sellable in intake but unpriceable here.
+const CUSTOM_PRICE_KEYS = BOTTLE_SIZES.map((s) => `custom_price_${s.value}`)
 const customPrices = reactive(Object.fromEntries(CUSTOM_PRICE_KEYS.map((k) => [k, ''])))
 const savingPrices = ref(false)
 
@@ -204,6 +225,7 @@ async function load() {
     referral.referral_discount_cents = dollars(set.referral_discount_cents)
     referral.referral_reward_cents = dollars(set.referral_reward_cents)
     referral.coupon_expiry_days = set.coupon_expiry_days
+    security.mfa_trust_hours = set.mfa_trust_hours
   } catch (err) {
     handle(err)
   } finally {
@@ -287,30 +309,6 @@ async function refreshIntegration() {
     ])
   } catch (err) {
     handle(err)
-  }
-}
-
-/**
- * Run the reconciliation report.
- *
- * `save` persists a snapshot; the plain refresh doesn't, so this screen can be
- * reloaded freely without filling the audit table with duplicates.
- */
-async function runReconcile(save = false) {
-  reconciling.value = true
-  error.value = ''
-  try {
-    report.value = await api.reconcile({
-      // Cover whole days in local time: from 00:00 on `from` to 23:59:59 on `to`.
-      from: new Date(`${range.from}T00:00:00`).toISOString(),
-      to: new Date(`${range.to}T23:59:59`).toISOString(),
-      save,
-    })
-    if (save) flash('Saved this reconciliation run.')
-  } catch (err) {
-    handle(err)
-  } finally {
-    reconciling.value = false
   }
 }
 
@@ -481,23 +479,22 @@ function formatTime(value) {
       <h2>Custom blend pricing</h2>
       <p class="muted">Retail price per size for bespoke custom blends — applies to every custom blend.</p>
       <div class="row">
-        <div>
-          <label>3.4 oz</label>
-          <input type="number" inputmode="decimal" min="0" step="0.01" v-model="customPrices.custom_price_oz3_4" />
-        </div>
-        <div>
-          <label>1.7 oz</label>
-          <input type="number" inputmode="decimal" min="0" step="0.01" v-model="customPrices.custom_price_oz1_7" />
-        </div>
-        <div>
-          <label>Roller</label>
-          <input type="number" inputmode="decimal" min="0" step="0.01" v-model="customPrices.custom_price_roller" />
-        </div>
-        <div>
-          <label>Spray (10 ml)</label>
-          <input type="number" inputmode="decimal" min="0" step="0.01" v-model="customPrices.custom_price_spray" />
+        <div v-for="size in BOTTLE_SIZES" :key="size.value">
+          <label :for="`custom-price-${size.value}`">{{ size.label }}</label>
+          <input
+            :id="`custom-price-${size.value}`"
+            v-model="customPrices[`custom_price_${size.value}`]"
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="0.01"
+          />
         </div>
       </div>
+      <p class="muted field-help">
+        Leave a size blank to not sell custom blends in it — a blank price takes
+        the option off the share page rather than offering a bottle with no cost.
+      </p>
       <button class="ghost" type="button" :disabled="savingPrices" style="margin-top: 0.8rem" @click="saveCustomPrices">
         {{ savingPrices ? 'Saving…' : 'Save custom-blend prices' }}
       </button>
@@ -552,6 +549,18 @@ function formatTime(value) {
     </section>
 
     <section
+      id="panel-shop"
+      role="tabpanel"
+      aria-labelledby="tab-shop"
+      v-show="activeTab === 'shop'"
+    >
+      <ShopManager
+        :scents="scents"
+        @scent-updated="(u) => (scents = scents.map((s) => (s.id === u.id ? u : s)))"
+      />
+    </section>
+
+    <section
       id="panel-team"
       role="tabpanel"
       aria-labelledby="tab-team"
@@ -562,6 +571,42 @@ function formatTime(value) {
         :current-email="currentUser?.email || ''"
         @changed="reloadTeam"
       />
+
+      <div class="card">
+        <h2>Sign-in security</h2>
+        <p class="muted">
+          After someone completes MFA, that device is remembered for this long.
+          Signing in again from it inside the window needs the password only —
+          no authenticator code. The password is <em>always</em> required; this
+          never skips it.
+        </p>
+
+        <div class="row">
+          <div class="field grow">
+            <label for="mfa-trust">Don't ask for MFA again for (hours)</label>
+            <input
+              id="mfa-trust"
+              v-model="security.mfa_trust_hours"
+              type="number"
+              inputmode="numeric"
+              min="0"
+              max="168"
+              step="1"
+            />
+          </div>
+        </div>
+        <p class="muted field-help">
+          0 asks for a code on every sign-in. The maximum is 168 hours (one week).
+          Lowering this applies straight away, including to devices already
+          trusted. A device stops being trusted early if the employee's password
+          is changed or reset, their MFA is reset, or their account is
+          deactivated.
+        </p>
+
+        <button class="ghost" type="button" :disabled="savingSecurity" @click="saveSecurity">
+          {{ savingSecurity ? 'Saving…' : 'Save sign-in security' }}
+        </button>
+      </div>
     </section>
 
     <section
@@ -629,180 +674,7 @@ function formatTime(value) {
       </div>
     </div>
 
-    <div class="card">
-      <h2>Reconciliation</h2>
-      <p class="muted">
-        Compares what this app recorded selling against what Square actually
-        collected. Every sale on both sides lands in exactly one bucket below.
-      </p>
-
-      <div class="row" style="gap: 0.5rem; align-items: flex-end; flex-wrap: wrap">
-        <label style="flex: none">
-          <span class="muted">From</span>
-          <input v-model="range.from" type="date" />
-        </label>
-        <label style="flex: none">
-          <span class="muted">To</span>
-          <input v-model="range.to" type="date" />
-        </label>
-        <button
-          class="ghost"
-          type="button"
-          style="flex: none"
-          :disabled="reconciling"
-          @click="runReconcile(false)"
-        >
-          {{ reconciling ? 'Checking…' : 'Run' }}
-        </button>
-        <button
-          class="ghost"
-          type="button"
-          style="flex: none"
-          :disabled="reconciling || !report"
-          @click="runReconcile(true)"
-        >
-          Run &amp; save
-        </button>
-      </div>
-
-      <template v-if="report">
-        <p
-          class="recon-summary"
-          :class="report.balanced ? 'ok-text' : 'danger-text'"
-          style="margin-top: 1rem"
-        >
-          {{ report.summary }}
-        </p>
-
-        <p class="muted danger-text" v-if="!report.live">
-          These figures came from the mock backend — they are a check of the logic,
-          not of your books.
-        </p>
-
-        <dl class="summary">
-          <dt>Square collected</dt>
-          <dd>{{ money(report.square_total_cents) }}</dd>
-          <dt>This app recorded</dt>
-          <dd>{{ money(report.local_total_cents) }}</dd>
-          <dt>Difference</dt>
-          <dd :class="report.difference_cents === 0 ? '' : 'danger-text'">
-            {{ money(report.difference_cents) }}
-          </dd>
-        </dl>
-
-        <h3 v-if="report.amount_mismatch.length" class="danger-text">
-          Amount mismatch ({{ report.amount_mismatch.length }})
-        </h3>
-        <p class="muted" v-if="report.amount_mismatch.length">
-          Both sides have the sale, but the totals differ — a tip, a discount, or the
-          price edited in Square after the link was made.
-        </p>
-        <div
-          v-for="row in report.amount_mismatch"
-          :key="row.cart_id"
-          class="list-item"
-          style="cursor: default"
-        >
-          <span class="grow">
-            <strong>Cart {{ shortId(row.cart_id) }}</strong>
-            <span class="muted">Square order {{ row.square_order_id }}</span>
-          </span>
-          <span class="badge danger-badge">
-            {{ money(row.square_cents) }} vs {{ money(row.local_cents) }}
-          </span>
-        </div>
-
-        <h3 v-if="report.missing_in_square.length" class="danger-text">
-          Missing in Square ({{ report.missing_in_square.length }})
-        </h3>
-        <p class="muted" v-if="report.missing_in_square.length">
-          Marked paid here, but Square has no matching payment in this window. Worth
-          investigating — this is the bucket that means money may not have been taken.
-        </p>
-        <div
-          v-for="row in report.missing_in_square"
-          :key="row.cart_id"
-          class="list-item"
-          style="cursor: default"
-        >
-          <span class="grow">
-            <strong>Cart {{ shortId(row.cart_id) }}</strong>
-            <span class="muted">
-              {{ row.square_order_id || 'never sent to Square' }} ·
-              {{ row.paid_at ? formatTime(row.paid_at) : '—' }}
-            </span>
-          </span>
-          <span class="badge danger-badge">{{ money(row.cents) }}</span>
-        </div>
-
-        <h3 v-if="report.unrecorded_payment.length" class="danger-text">
-          Paid but unrecorded ({{ report.unrecorded_payment.length }})
-        </h3>
-        <p class="muted" v-if="report.unrecorded_payment.length">
-          Square collected on these carts but this app never marked them paid —
-          almost always a webhook that didn’t arrive. Open the cart and press “Check
-          Square” to settle it, then check the webhook subscription.
-        </p>
-        <div
-          v-for="row in report.unrecorded_payment"
-          :key="row.cart_id"
-          class="list-item"
-          style="cursor: default"
-        >
-          <span class="grow">
-            <strong>Cart {{ shortId(row.cart_id) }}</strong>
-            <span class="muted">
-              Square order {{ row.square_order_id }} ·
-              {{ row.paid_at ? formatTime(row.paid_at) : '—' }}
-            </span>
-          </span>
-          <span class="badge danger-badge">{{ money(row.square_cents) }} collected</span>
-        </div>
-
-        <h3 v-if="report.missing_locally.length">
-          Only in Square ({{ report.missing_locally.length }})
-        </h3>
-        <p class="muted" v-if="report.missing_locally.length">
-          Square took money with no cart here — usually a sale rung up directly in the
-          Square POS. Not an error, but it should have an explanation.
-        </p>
-        <div
-          v-for="row in report.missing_locally"
-          :key="row.square_payment_id"
-          class="list-item"
-          style="cursor: default"
-        >
-          <span class="grow">
-            <strong>{{ row.square_payment_id }}</strong>
-            <span class="muted">{{ formatTime(row.created_at) }}</span>
-          </span>
-          <span class="badge">{{ money(row.cents) }}</span>
-        </div>
-
-        <h3 v-if="report.awaiting_payment.length">
-          Awaiting payment ({{ report.awaiting_payment.length }})
-        </h3>
-        <p class="muted" v-if="report.awaiting_payment.length">
-          Links issued but not paid. Not a discrepancy; they expire after 24 hours.
-        </p>
-        <div
-          v-for="row in report.awaiting_payment"
-          :key="row.cart_id"
-          class="list-item"
-          style="cursor: default"
-        >
-          <span class="grow">
-            <strong>Cart {{ shortId(row.cart_id) }}</strong>
-            <span class="muted">{{ formatTime(row.created_at) }}</span>
-          </span>
-          <span class="badge">{{ money(row.cents) }}</span>
-        </div>
-
-        <p class="muted" style="margin-top: 1rem">
-          {{ report.matched.length }} matched exactly.
-        </p>
-      </template>
-    </div>
+    <TerminalManager :backend="square?.backend || ''" />
 
     <div class="card">
       <h2>Recent Square events</h2>
@@ -900,7 +772,7 @@ function formatTime(value) {
 </template>
 
 <style scoped>
-/* Sticky so the tabs stay reachable inside a long panel — Reconciliation in
+/* Sticky so the tabs stay reachable inside a long panel — Billing in
    particular can run to several screens. */
 .tabstrip {
   position: sticky;

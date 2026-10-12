@@ -310,6 +310,7 @@ async fn resolve_line(
                     return Err(AppError::BadRequest("amount_ml must be positive".into()));
                 }
             }
+            crate::models::mix::check_formula_total(mix.items.iter().map(|i| i.amount_ml))?;
         }
         OrderType::SetPerfume => {
             if item.mix.is_some() {

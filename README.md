@@ -1,10 +1,11 @@
 # Blend Bar — Perfume Stand Intake App
 
 Self-hosted stand-intake app: Rust/Axum API, Vue 3 frontend, Postgres, all behind
-Caddy for automatic HTTPS. **Square is the billing system** — carts are handed to
-Square's hosted checkout, so no card ever touches this app — while this app's own
+Caddy for automatic HTTPS. **Square is the billing system** — in person a sale is
+sent to a **Square Terminal** through Square's cloud Terminal API; online it is a
+Square hosted payment link — so no card ever touches this app, while this app's own
 Postgres remains the source of truth for customers, preferences, mixes, and orders.
-The two are reconciled on demand; see [Square billing](#square-billing).
+See [Square billing](#square-billing).
 
 > For a non-technical summary of status, risks, and what's needed to start taking
 > payments, see **[EXECUTIVE_BRIEF.md](EXECUTIVE_BRIEF.md)**.
@@ -52,6 +53,49 @@ over plain HTTP from inside the VPS:
 docker compose exec caddy wget -qO- http://api:8080/api/health
 ```
 
+## Promoting the sandbox site
+
+The customer site exists twice: `site/` is served at `sandbox.theblendbarokc.com`
+(edit here), and `site-prod/` is served at `theblendbarokc.com` (`www` redirects
+to it). Both use the same API and database. The production site changes only
+when you copy the sandbox over it:
+
+```bash
+rsync -a --delete site/ site-prod/
+docker compose up --build -d caddy
+```
+
+`CUSTOMER_SITE_URL` in `.env` sets which site the API links to in emails,
+scent QR codes and the Square return page. Point it at `https://theblendbarokc.com`
+once that domain's DNS is live, then `docker compose up -d api`.
+
+> **The two are currently out of step.** `site/` was rebuilt around the design
+> language described below; `site-prod/` is still the previous gold-on-cream
+> design. Promoting with the `rsync` above is what brings production across, and
+> it is a single deliberate step for exactly this reason.
+
+### Design language of the customer site
+
+`site/styles.css` is the whole system, and its header comment states the rules in
+full. The short version: large tight-tracked sans headlines carrying each
+section, a grey subhead under them, 980px pill buttons, 22–28px rounded
+borderless cards, white and cream bands alternating instead of dividers, and one
+quiet fade-and-rise on scroll. The serif survives on the brand wordmark only.
+
+Two constraints worth knowing before editing:
+
+- **No web fonts.** The CSP sets `font-src 'self'`, so the stack is
+  `-apple-system` first — which resolves to SF Pro on Apple hardware and is most
+  of where the look comes from — falling through Helvetica elsewhere.
+- **One stylesheet serves every page**: the marketing home, `/portal`, `/book`,
+  `/s/<id>` and `/thanks`. The component blocks at the bottom of the file dress
+  markup generated at runtime by `share.js`, `portal/app.js` and `book.js`, so a
+  class renamed there silently unstyles a page that is not the one being edited.
+
+`site/home.js` adds the scroll reveal and the footer year. It is additive on
+purpose: elements are hidden only if they are below the fold when the page loads,
+so with JavaScript off or broken the whole page is simply visible.
+
 ## Local development
 
 - `api`: `cd api && cargo run` (requires a local Postgres reachable at `DATABASE_URL`
@@ -76,22 +120,59 @@ with any authenticator app); after that, login is password + 6-digit code. The
 session lives in an httpOnly cookie, not in `localStorage`, and admins manage
 further accounts from **Admin → Team**.
 
+#### The MFA trust window
+
+Being made to fetch your phone every time the stand tablet's session lapses is
+the friction staff actually feel, so a device that has completed MFA stays
+trusted for a while: signing in again from it needs the **password only**. The
+window is set in **Admin → Team → Sign-in security** (`settings.mfa_trust_hours`,
+default **4 hours**, `0` disables it and asks for MFA every time, ceiling one
+week).
+
+What it does not relax:
+
+- **The password is always required.** The trust cookie is consulted only after
+  argon2 has verified the password, and authenticates nobody on its own.
+- **A grant belongs to one employee.** The stand tablet is shared; trust issued
+  to one person is ignored when anybody else signs in on it.
+- **Enrolment is never skipped** — an employee who has not set up MFA still does.
+
+A device stops being trusted early when the employee's password is changed or
+reset, their MFA is reset, or their account is deactivated. Lowering the setting
+applies immediately to grants already issued, because the window is re-checked
+against the current value on every sign-in rather than only baked into the
+cookie's expiry.
+
+Signing out deliberately does *not* clear the trust — that is the case the
+setting exists for. On a device that should not be remembered at all, set the
+window to 0, or reset that employee's MFA to drop every grant they hold.
+
 > **Superseded:** an earlier build paired tablets with a device token
 > (`issue-device-token` + a paste-the-token screen). That model was replaced by
 > employee accounts in Phase 2b. The CLI subcommand still exists but nothing
 > checks the tokens it issues — `auth::require_operator_token` is dead code kept
 > only until the subcommand is removed. Do not build against it.
 
-- **Intake** — customer details, marketing consent, scent preferences, and the order
-  (type, bottle size, status, amount). Custom mixes use the mix builder, capped at 8
+- **Intake** — customer details, marketing consent, and the order (type, bottle
+  size, status, amount). Custom mixes use the mix builder, capped at 8
   ingredients. Amounts are entered as the 3.4oz base formula; every other size is
-  shown derived, never stored.
+  shown derived, never stored. **Every formula — house scent or custom blend —
+  must total exactly 100 ml**, to 0.01 ml; the API refuses anything else and the
+  builder shows how far off it is. Because each size is its volume over 100 ml,
+  that one rule fills every bottle exactly.
 
-  Four bottle sizes: **3.4 oz** (the base), **1.7 oz** (half), **Roller** (a tenth
-  = 10 ml), and **Spray (10 ml)**. Roller and Spray are the same volume and so take
-  the same pour — they differ only in the closure (rollerball vs atomiser) and in
-  price, which is set per size on each scent and, for bespoke blends, globally in
-  Admin. A size with no price set is simply not offered for sale.
+  Six bottle sizes, largest first: **Vintage** (100 ml), **3.4 oz** (the base,
+  100 ml), **1.7 oz** (50 ml), **1 oz** (30 ml), **Roller** (10 ml), and
+  **Spray** (10 ml). The 1 oz was a 1.2 oz bottle until 2026-10-05 and keeps
+  its stored code `oz1_2`. Two pairs hold the same volume and so
+  take the same pour, differing only in the bottle and the price: Vintage/3.4 oz,
+  and Roller/Spray (rollerball vs atomiser). Price is set per size on each scent
+  and, for bespoke blends, globally in Admin. A size with no price set is simply
+  not offered for sale.
+
+  Scent preferences are no longer collected at intake — the stand flow is the
+  customer, the bottles, and out. Preferences already on a customer record are
+  untouched and still shown in Lookup.
 - **Lookup** — search customers by email, see their saved mixes and orders, and
   "Reorder" a mix to open intake with that customer and mix prefilled.
 - **Admin** — manage the ingredient and scent catalogs (add, activate/deactivate).
@@ -101,11 +182,15 @@ further accounts from **Admin → Team**.
   (a house recipe), built with the same mix builder as custom mixes; set-perfume
   orders show that breakdown in intake and in a customer's order history. Also
   shows **Square billing** status (live vs. mock, webhook receiver, cart counts,
-  money awaiting payment), the **reconciliation** report over a date range, and
-  recent inbound Square events. Server-side secrets (`SQUARE_ACCESS_TOKEN`,
+  money awaiting payment), **Square Terminals** (pairing, the default Terminal,
+  Sandbox test devices), and recent inbound Square events. Server-side secrets (`SQUARE_ACCESS_TOKEN`,
   `SQUARE_WEBHOOK_SIGNATURE_KEY`, …) are set in `.env`, not from the UI.
-- **Checkout** — build a cart from a customer's unsold orders plus any ad-hoc lines,
-  then show the Square payment link as a QR code for the customer to scan. See
+- **Intake → payment.** Save intake now also builds the cart for what was just
+  saved and shows **Charge $X on <Terminal>**; the customer taps or inserts on the
+  Terminal and the screen flips to Paid on its own. A payment link / QR is offered
+  as the fallback.
+- **Checkout** — build a cart from a customer's unsold orders plus any ad-hoc lines
+  (deposits, fees), then the same payment panel as intake. See
   [Square billing](#square-billing).
 
 Each submission carries a generated `Idempotency-Key` that is held steady across
@@ -192,30 +277,73 @@ the bar are left alone, because those blends physically exist.
 
 After payment Square returns the buyer to `/thanks`.
 
-### Reconciliation
+### Paying on a Square Terminal
 
-`GET /api/square/reconcile?from=&to=` compares what this app recorded selling against
-what Square actually collected, joined on `carts.square_order_id`. Every sale on
-either side lands in exactly one bucket:
+```
+Save intake → cart → "Charge on Terminal"
+                     → POST /v2/orders               (Square order for the cart)
+                     → POST /v2/terminals/checkouts  (Square relays it to the Terminal)
+customer taps / inserts on the Terminal
+                     → payment on that order
+                     → cart = paid, by whichever comes first:
+                         payment.updated / terminal.checkout.updated webhook, or
+                         the screen polling GET /api/carts/:id/terminal every 2 s
+```
 
-| Bucket | Meaning | What to do |
-|---|---|---|
-| `matched` | Both sides agree to the cent | nothing |
-| `amount_mismatch` | Both have it, totals differ | check for a tip, a discount, or a price edited in the Square dashboard |
-| `missing_in_square` | Marked paid here, no Square payment | **investigate** — the bucket that means money may not have been taken |
-| `unrecorded_payment` | Square collected, but the cart never left `pending_payment` | a lost webhook — press "Check Square" on that cart, then fix the subscription |
-| `missing_locally` | Square collected, no cart here at all | usually a sale rung up directly in the Square POS |
-| `awaiting_payment` | Link issued, not yet paid | informational; expires after 24h |
+- **Any browser.** The request goes from this server to Square's cloud and from
+  there to the Terminal over Wi-Fi/ethernet. Nothing is sent to the browser, there
+  is no app-switch and no Bluetooth, so a laptop works exactly like an iPad. It
+  needs a **Square Terminal**; a Square Reader (the "puck") can't be driven this
+  way — it only works inside Square's own POS app or a native app built with
+  Square's Mobile SDK.
+- **Settlement is shared.** A Terminal payment carries the Square order id, so it
+  lands in the same `billing::apply_payment` as a payment-link sale. The poll
+  makes it work before webhooks are configured; the webhook makes it work when
+  nobody is watching the screen.
+- **Double-press safe.** While a checkout is on the device, "Charge" returns it
+  instead of sending another. Idempotency keys are derived from the cart, so a
+  retried request after a timeout can't queue a second checkout.
+- **Cancel.** "Cancel on the Terminal" takes it off the device; the cart stays so
+  it can be re-sent (same Square order) or canceled. Canceling the *sale* cancels
+  on the Terminal **first** and refuses if Square says it's too late — the
+  customer may be paying at that moment.
+- **One method per cart.** Each path creates its own Square order and a cart has
+  one `square_order_id`, so a cart with a payment link must be canceled before it
+  can go to a Terminal, and vice versa.
+- **Tips** entered on the Terminal stay in Square: the cart records the sale
+  amount (`amount_money`), not the tip.
+- **Pairing** (Admin → Billing → Square Terminals): the app asks Square for a
+  device code; on the Terminal, *Sign in → Use a device code*. The panel polls (and
+  the `device.code.paired` webhook also lands) until it's paired. The first paired
+  Terminal is the default. In Sandbox, Square's published test device ids are
+  added by id instead — they approve, cancel, time out or go offline on demand.
 
-Run it from Admin → Reconciliation. "Run & save" stores a snapshot in
-`reconciliation_runs`, so a discrepancy found today is still inspectable next month
-even after the underlying rows are fixed up. `GET /api/square/reconcile/history`
-lists saved runs.
+Routes: `POST/GET /api/carts/:id/terminal`, `POST /api/carts/:id/terminal/cancel`,
+`GET/POST /api/square/terminals`, `POST /api/square/terminals/pair`,
+`GET/PATCH/DELETE /api/square/terminals/:id`. Code: `api/src/routes/terminal.rs`,
+`web/src/components/PayPanel.vue`, `TerminalManager.vue`.
 
-Window edges are handled deliberately: Square's list is authoritative for the period,
-and the local side then pulls in any cart *either* paid in the window *or* named by a
-payment Square returned — otherwise a sale at 23:59 would report as missing on one
-side and orphaned on the other.
+### Square permissions
+
+The token currently in `.env` is a **personal access token**, which carries every
+permission on the account. Moving to **OAuth** lets the app hold only what it
+uses. The minimum set for what this app does today:
+
+| Permission | Used for |
+|---|---|
+| `ORDERS_WRITE` | creating the Square order for a cart; payment links |
+| `ORDERS_READ` | reading an order back ("Check Square"); payment links |
+| `PAYMENTS_WRITE` | sending and canceling Terminal checkouts; payment links |
+| `PAYMENTS_READ` | reading a Terminal checkout's status and the payment it made — the poll and every webhook re-fetch |
+| `DEVICE_CREDENTIAL_MANAGEMENT` | pairing a Terminal with a device code |
+| `CUSTOMERS_READ`, `CUSTOMERS_WRITE` | contact sync to Square Customers (drop both if that sync is turned off) |
+
+Not needed: `ITEMS_READ` / `INVENTORY_READ` (prices come from this app's own
+catalogue), `MERCHANT_PROFILE_READ`. Never to be granted: `BANK_ACCOUNTS_READ`,
+`BANK_ACCOUNTS_WRITE`, `PAYOUTS_READ`, `CASH_DRAWER_READ`, or anything else.
+
+The reconciliation report was removed on 2026-10-08 at the owner's request; the
+`reconciliation_runs` table is kept as read-only history.
 
 ### Inbound webhooks
 
@@ -234,7 +362,11 @@ disabled and returns 503** — it never runs unauthenticated. Until webhooks are
 "Check Square" on the checkout screen (`POST /api/carts/:id/refresh`) pulls the payment
 state directly; that button is also the recovery path for a webhook lost to a deploy.
 
-- `GET /api/square/status` — backend, live-vs-mock, webhook state, cart counts.
+Events acted on: `payment.*` and `refund.*` (settle the cart),
+`terminal.checkout.*` (re-fetch the checkout and settle), and `device.code.*`
+(finish pairing). Everything else is filed and ignored.
+
+- `GET /api/square/status` — backend, live-vs-mock, webhook state, cart counts, Terminals.
 - `GET /api/square/events` — recent inbound webhooks, for debugging.
 
 ## Email (Google Workspace)
@@ -421,8 +553,8 @@ there waiting for a link.
 
 The app runs on an **in-process mock** until credentials are set: it produces fake
 payment links, charges nobody, and says so in red on both the checkout screen and the
-admin panel. The mock still exercises the full path (checkout → payment →
-reconciliation), which is how the logic is tested without credentials.
+admin panel. The mock still exercises the full path (checkout or Terminal → payment →
+settlement), which is how the logic is tested without credentials.
 
 The live HTTP client in `api/src/square/http.rs` has been exercised against **Square
 Sandbox** (2026-10-01, steps 1–3 below) but has **not yet taken a production
@@ -440,17 +572,22 @@ payment**. Work through this before taking real money — ✅ marks what is done
    $1.00 cart matched Square on order, line, amount, payment id and location. It was
    settled with "Check Square" because webhooks were not yet on — re-test after step 4
    to see it flip **on its own**.*
+   ✅ *Terminal, 2026-10-08: against Square Sandbox's test devices — approved, buyer
+   canceled then re-sent and paid, offline then canceled, and canceled mid-sale —
+   plus a signed `terminal.checkout.updated` webhook settling a cart on its own.*
 4. Create the webhook subscription pointing at
    `https://<your-domain>/api/webhooks/square`. Subscribe to `payment.created`,
-   `payment.updated`, `refund.created` and `refund.updated` — the receiver acts on
-   `payment.*` and `refund.*` only and ignores anything else (e.g. `order.*`). Put
+   `payment.updated`, `refund.created`, `refund.updated`,
+   `terminal.checkout.created`, `terminal.checkout.updated` and
+   `device.code.paired` — anything else (e.g. `order.*`) is filed and ignored. Put
    Square's signature key in `SQUARE_WEBHOOK_SIGNATURE_KEY` and the identical URL in
    `SQUARE_WEBHOOK_URL`. Restart, then confirm events land in Admin → Recent Square
    events.
-5. Run Admin → Reconciliation over the test window and confirm it balances against
-   what the Square dashboard shows.
-6. Only then swap in the **production** token and location and set
-   `SQUARE_ENV=production`. The API logs a warning at startup in that mode.
+5. Buy a **Square Terminal**, then switch to production: production token (or OAuth,
+   with the permissions above) and location, `SQUARE_ENV=production`. The API logs
+   a warning at startup in that mode. Pair the Terminal from Admin → Billing.
+6. Take one small real payment on the Terminal and refund it in Square; confirm the
+   cart goes paid → refunded.
 
 [sq-test]: https://developer.squareup.com/docs/devtools/sandbox/payments
 
@@ -458,8 +595,8 @@ payment**. Work through this before taking real money — ✅ marks what is done
 
 Milestones 1–7 are done and validated live on the VPS: scaffold + TLS, schema,
 operator auth / CRUD / intake, the operator UI, and the reorder endpoint. Billing was
-migrated from Squarespace to Square (carts, hosted checkout, webhook receiver,
-reconciliation) — validated end-to-end against the mock backend, covered by unit
+migrated from Squarespace to Square (carts, hosted checkout, webhook receiver)
+and, on 2026-10-08, given Square Terminal payments — validated end-to-end against the mock backend, covered by unit
 tests, and as of 2026-10-01 **connected to Square Sandbox** with one staff test payment
 verified against Square. Webhooks and production credentials are not yet set — see
 [Going live on Square](#going-live-on-square). See `RESUME.md` for

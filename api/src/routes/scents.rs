@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::employee_auth::AdminEmployee;
 use crate::error::AppError;
+use crate::models::mix::check_formula_total;
 use crate::models::scent::{Scent, ScentItem};
 use crate::routes::ingredients::assert_active_ingredients;
 use crate::routes::mixes::MixItemInput;
@@ -75,7 +76,7 @@ pub async fn fetch_scent_detail(pool: &PgPool, id: Uuid) -> Result<Option<ScentD
 
 /// Validates a scent's formula: an empty formula is allowed (recipe not defined
 /// yet); a non-empty one must be at most 8 distinct active ingredients with
-/// positive amounts — the same rule mixes use.
+/// positive amounts totalling exactly 100 ml — the same rule mixes use.
 async fn validate_formula(pool: &PgPool, items: &[MixItemInput]) -> Result<(), AppError> {
     if items.is_empty() {
         return Ok(());
@@ -87,6 +88,7 @@ async fn validate_formula(pool: &PgPool, items: &[MixItemInput]) -> Result<(), A
             return Err(AppError::BadRequest("amount_ml must be positive".into()));
         }
     }
+    check_formula_total(items.iter().map(|i| i.amount_ml))?;
     Ok(())
 }
 
@@ -152,8 +154,10 @@ pub async fn create(
 
 #[derive(Deserialize)]
 pub struct ScentPrices {
+    pub vintage: Option<Decimal>,
     pub oz3_4: Option<Decimal>,
     pub oz1_7: Option<Decimal>,
+    pub oz1_2: Option<Decimal>,
     pub roller: Option<Decimal>,
     pub spray: Option<Decimal>,
 }
@@ -177,11 +181,14 @@ pub async fn update(
         validate_formula(&state.db, items).await?;
     }
 
-    let (set_prices, p3_4, p1_7, roller, spray) = match &body.prices {
-        Some(p) => (true, p.oz3_4, p.oz1_7, p.roller, p.spray),
-        None => (false, None, None, None, None),
+    let (set_prices, vintage, p3_4, p1_7, p1_2, roller, spray) = match &body.prices {
+        Some(p) => (true, p.vintage, p.oz3_4, p.oz1_7, p.oz1_2, p.roller, p.spray),
+        None => (false, None, None, None, None, None, None),
     };
-    for price in [p3_4, p1_7, roller, spray].into_iter().flatten() {
+    for price in [vintage, p3_4, p1_7, p1_2, roller, spray]
+        .into_iter()
+        .flatten()
+    {
         if price < Decimal::ZERO {
             return Err(AppError::BadRequest("prices can't be negative".into()));
         }
@@ -193,10 +200,12 @@ pub async fn update(
         update scents set
           name = coalesce($2, name),
           active = coalesce($3, active),
-          price_oz3_4  = case when $4 then $5 else price_oz3_4 end,
-          price_oz1_7  = case when $4 then $6 else price_oz1_7 end,
-          price_roller = case when $4 then $7 else price_roller end,
-          price_spray  = case when $4 then $8 else price_spray end
+          price_vintage = case when $4 then $5  else price_vintage end,
+          price_oz3_4   = case when $4 then $6  else price_oz3_4 end,
+          price_oz1_7   = case when $4 then $7  else price_oz1_7 end,
+          price_oz1_2   = case when $4 then $8  else price_oz1_2 end,
+          price_roller  = case when $4 then $9  else price_roller end,
+          price_spray   = case when $4 then $10 else price_spray end
         where id = $1 returning *
         "#,
     )
@@ -204,8 +213,10 @@ pub async fn update(
     .bind(&body.name)
     .bind(body.active)
     .bind(set_prices)
+    .bind(vintage)
     .bind(p3_4)
     .bind(p1_7)
+    .bind(p1_2)
     .bind(roller)
     .bind(spray)
     .fetch_optional(&mut *tx)

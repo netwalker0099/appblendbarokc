@@ -24,7 +24,7 @@ use crate::square::money::{self, DEFAULT_CURRENCY};
 use crate::square::{CheckoutPush, LineItemPush};
 use crate::AppState;
 
-fn site_url() -> String {
+pub(crate) fn site_url() -> String {
     std::env::var("CUSTOMER_SITE_URL")
         .unwrap_or_else(|_| "https://sandbox.theblendbarokc.com".to_string())
 }
@@ -35,8 +35,10 @@ pub struct PublicScent {
     pub name: String,
     /// Ingredient names only — no amounts.
     pub notes: Vec<String>,
+    pub price_vintage: Option<Decimal>,
     pub price_oz3_4: Option<Decimal>,
     pub price_oz1_7: Option<Decimal>,
+    pub price_oz1_2: Option<Decimal>,
     pub price_roller: Option<Decimal>,
     pub price_spray: Option<Decimal>,
 }
@@ -63,8 +65,10 @@ pub async fn scent(
         id: scent.id,
         name: scent.name,
         notes,
+        price_vintage: scent.price_vintage,
         price_oz3_4: scent.price_oz3_4,
         price_oz1_7: scent.price_oz1_7,
+        price_oz1_2: scent.price_oz1_2,
         price_roller: scent.price_roller,
         price_spray: scent.price_spray,
     }))
@@ -169,15 +173,7 @@ pub async fn checkout(
     // Sandbox counts as not live here: a sandbox link takes a "payment" that
     // moves no money, which is just as wrong to hand a real customer. Staff
     // checkout still works against sandbox, which is how it gets tested.
-    if !state.square.is_live() || state.square.name() != "square-production" {
-        tracing::warn!(
-            backend = state.square.name(),
-            "public checkout attempted while Square is not in production"
-        );
-        return Err(AppError::Unavailable(
-            "online checkout is not available right now".into(),
-        ));
-    }
+    ensure_public_checkout_live(&state)?;
 
     let mut tx = state.db.begin().await?;
 
@@ -305,6 +301,7 @@ pub async fn checkout(
         },
         redirect_url: Some(format!("{}/thanks", site_url())),
         note: cart.note.clone(),
+        ask_for_shipping_address: false,
     };
 
     let handle = state.square.create_checkout(&push).await.map_err(|e| {
@@ -318,6 +315,7 @@ pub async fn checkout(
         r#"
         update carts set
             status = 'pending_payment',
+            payment_method = 'link',
             square_order_id = $2,
             square_payment_link_id = $3,
             checkout_url = $4,
@@ -346,6 +344,26 @@ pub async fn checkout(
         discount_cents,
         total_cents,
     }))
+}
+
+/// Whether anonymous checkout is switched on — Square live, and production.
+pub(crate) fn public_checkout_live(state: &AppState) -> bool {
+    state.square.is_live() && state.square.name() == "square-production"
+}
+
+/// Refuse an anonymous checkout unless Square is in production. Shared by the
+/// share-page checkout and the online shop — see the reasoning in [`checkout`].
+pub(crate) fn ensure_public_checkout_live(state: &AppState) -> Result<(), AppError> {
+    if !public_checkout_live(state) {
+        tracing::warn!(
+            backend = state.square.name(),
+            "public checkout attempted while Square is not in production"
+        );
+        return Err(AppError::Unavailable(
+            "online checkout is not available right now".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// An SVG QR code that points at the scent's public share page.

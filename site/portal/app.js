@@ -5,10 +5,12 @@
   const esc = (s) =>
     String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
   const SIZES = [
+    ['vintage', 'Vintage'],
     ['oz3_4', '3.4 oz'],
     ['oz1_7', '1.7 oz'],
+    ['oz1_2', '1 oz'],
     ['roller', 'Roller'],
-    ['spray', 'Spray · 10 ml'],
+    ['spray', 'Spray'],
   ]
 
   async function api(path, opts = {}) {

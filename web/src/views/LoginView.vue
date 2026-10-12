@@ -23,6 +23,12 @@ async function submitLogin() {
   error.value = ''
   try {
     const res = await api.login(email.value.trim().toLowerCase(), password.value)
+    if (res.status === 'ok') {
+      // This device is still inside its MFA trust window (Admin → Team →
+      // Sign-in security), so the password was the whole sign-in.
+      await finish()
+      return
+    }
     if (res.status === 'enroll_required') {
       enroll.value = await api.mfaEnroll()
       step.value = 'enroll'
@@ -37,15 +43,21 @@ async function submitLogin() {
   }
 }
 
+/// Load the signed-in employee and go where they were headed. Shared by both
+/// ways in: password + code, and password alone on a trusted device.
+async function finish() {
+  await loadUser()
+  const next = typeof route.query.next === 'string' ? route.query.next : null
+  router.push(next || { name: 'intake' })
+}
+
 async function submitCode() {
   if (busy.value) return
   busy.value = true
   error.value = ''
   try {
     await api.mfaVerify(code.value.trim())
-    await loadUser()
-    const next = typeof route.query.next === 'string' ? route.query.next : null
-    router.push(next || { name: 'intake' })
+    await finish()
   } catch (err) {
     error.value = err.status === 401 ? 'That code didn’t match. Try again.' : err.message
     code.value = ''

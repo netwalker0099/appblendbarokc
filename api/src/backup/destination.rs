@@ -96,8 +96,9 @@ pub async fn build(
     match dest.kind.as_str() {
         "google_drive" => {
             let account = load_service_account()?;
-            // Per-destination override, else the mailbox email already sends as.
-            let impersonate = dest
+            // Per-destination override, else the environment, else the mailbox
+            // saved alongside the key in Admin → Backups.
+            let impersonate = match dest
                 .config
                 .get("impersonate")
                 .and_then(|v| v.as_str())
@@ -108,8 +109,17 @@ pub async fn build(
                         .ok()
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty())
-                })
-                .unwrap_or_default();
+                }) {
+                Some(mailbox) => mailbox,
+                None => sqlx::query_scalar::<_, Option<String>>(
+                    "select google_impersonate from email_settings where id = true",
+                )
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|e| BackupError::NotConfigured(e.to_string()))?
+                .flatten()
+                .unwrap_or_default(),
+            };
 
             let folder_id = dest
                 .config
@@ -147,15 +157,15 @@ pub async fn build(
 }
 
 /// The service-account key, from the environment or the one an admin uploaded
-/// for email. Shared deliberately: making someone upload the same key twice is
-/// two things to rotate and one of them will be forgotten.
+/// under Admin → Backups. Drive is the only thing that still needs one: email
+/// sends through the Workspace SMTP relay, which authorises this server by IP.
 fn load_service_account() -> Result<gmail::ServiceAccount, BackupError> {
     gmail::load_service_account()
         .or_else(credentials::load_stored)
         .ok_or_else(|| {
             BackupError::NotConfigured(
                 "no Google service-account key is configured — connect Google under \
-                 Admin → Email first; Drive backups reuse that key."
+                 Admin → Backups first."
                     .into(),
             )
         })?

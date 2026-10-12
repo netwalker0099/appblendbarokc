@@ -102,6 +102,13 @@ pub async fn update(
         ));
     }
     tx.commit().await?;
+
+    // Deactivating cuts sessions elsewhere already (the guard checks `active`);
+    // the trust grants have to go too, or re-activating the account months later
+    // would silently restore a device's MFA bypass.
+    if body.active == Some(false) {
+        ea::revoke_trust(&state.db, id, None).await?;
+    }
     Ok(Json(view))
 }
 
@@ -127,6 +134,9 @@ pub async fn reset_password(
         .bind(id)
         .execute(&state.db)
         .await?;
+    // And every trusted device: whoever gets the temp password must prove the
+    // second factor again, whatever they are signing in from.
+    ea::revoke_trust(&state.db, id, None).await?;
 
     Ok(Json(json!({ "temp_password": temp })))
 }
@@ -149,6 +159,10 @@ pub async fn reset_mfa(
         .bind(id)
         .execute(&state.db)
         .await?;
+    // Trust grants were issued against the secret being cleared, so they die
+    // with it — otherwise a lost-device reset would leave the lost device
+    // trusted.
+    ea::revoke_trust(&state.db, id, None).await?;
 
     Ok(Json(json!({ "status": "ok" })))
 }

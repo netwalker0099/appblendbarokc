@@ -9,4 +9,5 @@ RUN npm run build
 FROM caddy:2-alpine
 COPY --from=build /app/dist /usr/share/caddy
 COPY site /usr/share/blendbar-site
+COPY site-prod /usr/share/blendbar-site-prod
 COPY Caddyfile /etc/caddy/Caddyfile

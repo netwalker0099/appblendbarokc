@@ -255,42 +255,71 @@ impl Mailer for MockMailer {
     }
 }
 
+/// What the Email panel is allowed to know about the relay. The password is
+/// deliberately absent: the panel needs to explain where mail goes and how it
+/// authorises, and neither answer requires the secret itself.
+#[derive(serde::Serialize)]
+pub struct RelayStatus {
+    pub host: String,
+    pub port: u16,
+    /// "ip-allowlist" when the relay authorises this server by its address —
+    /// the keyless arrangement — or "smtp-auth" when a login is configured.
+    pub auth: &'static str,
+}
+
+/// `None` when no relay is configured, which is the mock-mailer case.
+pub fn relay_status() -> Option<RelayStatus> {
+    let host = std::env::var("SMTP_HOST")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())?;
+    let port: u16 = std::env::var("SMTP_PORT")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(587);
+    let auth = if std::env::var("SMTP_USERNAME").is_ok_and(|s| !s.trim().is_empty()) {
+        "smtp-auth"
+    } else {
+        "ip-allowlist"
+    };
+    Some(RelayStatus { host, port, auth })
+}
+
 // --- Wiring -----------------------------------------------------------------
 
 /// Build the mailer from the environment.
 ///
 /// Order of preference:
 ///
-/// 1. **Gmail API** with a service account, when a key and a mailbox to
-///    impersonate are both present. Preferred because it does not depend on the
-///    server's IP address, sends as a real mailbox (so the message appears in
-///    that account's Sent folder), and has nothing that expires.
-/// 2. **SMTP relay**, when `SMTP_HOST` is set.
+/// 1. **Gmail API** with a service account, when `GOOGLE_SA_KEY_FILE` and
+///    `GOOGLE_IMPERSONATE` are both set. Kept for a deployment that deliberately
+///    chooses it in `.env`; this one does not.
+/// 2. **SMTP relay**, when `SMTP_HOST` is set. What this deployment runs on:
+///    the Workspace relay authorises by IP, so there is no credential on the box.
 /// 3. **Mock**, which logs instead of sending.
+///
+/// Only the *environment* can select the Gmail API. A key uploaded through the
+/// admin panel belongs to Google Drive backups (Admin → Backups) and must not
+/// quietly move email off the relay — a credential added for one job silently
+/// taking over another is how an admin ends up debugging a transport nobody
+/// chose.
 ///
 /// A half-configured backend is never silently downgraded to the next one
 /// without saying so — a misconfiguration that quietly falls back to "logs
 /// nothing to anyone" is how a business discovers its email is off by hearing
 /// about it from a customer.
 pub fn from_env() -> Arc<dyn Mailer> {
-    build(None)
+    build()
 }
 
-/// Rebuild the mailer, optionally with the mailbox an admin configured in the
-/// database. Called at boot and again whenever credentials change, so saving them
-/// takes effect without a restart.
-pub fn build(stored_impersonate: Option<String>) -> Arc<dyn Mailer> {
-    // A key from the environment wins over one uploaded through the browser: an
-    // ops-managed deployment should not be silently overridden by a form, and if
-    // both exist the environment is the one an operator can actually see.
-    let loaded_key = gmail::load_service_account().or_else(credentials::load_stored);
-
-    if let Some(loaded) = loaded_key {
+/// Rebuild the mailer from the environment. Called at boot, and again whenever
+/// something that could change the transport is saved.
+pub fn build() -> Arc<dyn Mailer> {
+    if let Some(loaded) = gmail::load_service_account() {
         let impersonate = std::env::var("GOOGLE_IMPERSONATE")
             .ok()
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .or(stored_impersonate);
+            .filter(|s| !s.is_empty());
 
         match (loaded, impersonate) {
             (Ok(account), Some(mailbox)) => {
@@ -323,10 +352,11 @@ pub fn build(stored_impersonate: Option<String>) -> Arc<dyn Mailer> {
 
     let Some(host) = host else {
         tracing::warn!(
-            "No email transport configured — using the mock mailer. Set either \
-             GOOGLE_SA_KEY_FILE + GOOGLE_IMPERSONATE (Gmail API, preferred) or \
-             SMTP_HOST (Workspace relay). Until then sign-in links are written to \
-             this log instead of emailed, and no customer receives anything."
+            "No email transport configured — using the mock mailer. Set SMTP_HOST \
+             (the Workspace relay, what this deployment uses) or, to go back to the \
+             Gmail API, GOOGLE_SA_KEY_FILE + GOOGLE_IMPERSONATE. Until then sign-in \
+             links are written to this log instead of emailed, and no customer \
+             receives anything."
         );
         return Arc::new(MockMailer);
     };

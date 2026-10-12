@@ -9,8 +9,10 @@ pub struct Scent {
     pub name: String,
     pub active: bool,
     // Per-size retail prices; null until an admin sets them.
+    pub price_vintage: Option<Decimal>,
     pub price_oz3_4: Option<Decimal>,
     pub price_oz1_7: Option<Decimal>,
+    pub price_oz1_2: Option<Decimal>,
     pub price_roller: Option<Decimal>,
     pub price_spray: Option<Decimal>,
     pub created_at: DateTime<Utc>,

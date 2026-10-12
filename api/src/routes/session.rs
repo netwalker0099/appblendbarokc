@@ -3,8 +3,8 @@
 //! open router (they can't require an existing full session).
 
 use axum::extract::State;
-use axum::http::HeaderMap;
-use axum::response::Response;
+use axum::http::{header, HeaderMap};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -22,8 +22,14 @@ pub struct LoginRequest {
 
 /// Verify the password and open a *pending* session (cookie set, but only the MFA
 /// endpoints accept it). Returns whether the employee must enroll MFA or verify.
+///
+/// One exception: if this device is still inside its MFA trust window for *this*
+/// employee (see `settings.mfa_trust_hours`), the session opens fully authenticated
+/// and the response says `"ok"` — the password was still required, only the second
+/// factor is skipped.
 pub async fn login(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> Result<Response, AppError> {
     let email = body.email.trim().to_lowercase();
@@ -47,23 +53,42 @@ pub async fn login(
         return Err(AppError::Unauthorized);
     };
 
+    // Only an already-enrolled employee can be waved past MFA; enrollment itself
+    // is never skippable.
+    let trusted =
+        employee.mfa_enrolled && ea::device_trusted(&state.db, &headers, employee.id).await;
+
     let token = ea::generate_session_token();
     sqlx::query(
-        "insert into employee_sessions (token_hash, employee_id, mfa_pending, expires_at) values ($1, $2, true, $3)",
+        "insert into employee_sessions (token_hash, employee_id, mfa_pending, expires_at) values ($1, $2, $3, $4)",
     )
     .bind(ea::hash_token(&token))
     .bind(employee.id)
+    .bind(!trusted)
     .bind(ea::session_expiry())
     .execute(&state.db)
     .await?;
 
-    let status = if employee.mfa_enrolled {
+    let mut cookies = vec![ea::set_cookie(&token)];
+    let status = if trusted {
+        sqlx::query("update employees set last_login_at = now() where id = $1")
+            .bind(employee.id)
+            .execute(&state.db)
+            .await?;
+        "ok"
+    } else if employee.mfa_enrolled {
+        // A trust cookie was presented but is expired, revoked, or belongs to
+        // someone else. Clear it rather than let the browser keep replaying a
+        // token that will never be honoured again.
+        if ea::read_trust_cookie(&headers).is_some() {
+            cookies.push(ea::clear_trust_cookie());
+        }
         "mfa_required"
     } else {
         "enroll_required"
     };
-    Ok(ea::json_with_cookie(
-        ea::set_cookie(&token),
+    Ok(ea::json_with_cookies(
+        cookies,
         json!({ "status": status, "email": employee.email, "role": employee.role }),
     ))
 }
@@ -109,12 +134,15 @@ pub async fn mfa_verify(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(body): Json<MfaVerifyRequest>,
-) -> Result<Json<Value>, AppError> {
+) -> Result<Response, AppError> {
     let (session, employee) = ea::load_session(&state.db, &headers)
         .await
         .ok_or(AppError::Unauthorized)?;
     if !session.mfa_pending {
-        return Ok(Json(json!({ "status": "ok", "email": employee.email, "role": employee.role })));
+        return Ok(
+            Json(json!({ "status": "ok", "email": employee.email, "role": employee.role }))
+                .into_response(),
+        );
     }
     let secret = employee
         .totp_secret
@@ -142,7 +170,18 @@ pub async fn mfa_verify(
         .await?;
     tx.commit().await?;
 
-    Ok(Json(json!({ "status": "ok", "email": employee.email, "role": employee.role })))
+    // Verified here and now: start this device's trust window, so the next
+    // sign-in from it inside the window needs only the password. Off (and no
+    // cookie at all) when `mfa_trust_hours` is 0.
+    let user_agent = headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .map(|ua| ua.chars().take(200).collect::<String>());
+    let body = json!({ "status": "ok", "email": employee.email, "role": employee.role });
+    match ea::grant_trust(&state.db, employee.id, user_agent.as_deref()).await? {
+        Some(cookie) => Ok(ea::json_with_cookie(cookie, body)),
+        None => Ok(Json(body).into_response()),
+    }
 }
 
 pub async fn logout(
@@ -199,6 +238,10 @@ pub async fn change_password(
         .bind(session.id)
         .execute(&state.db)
         .await?;
+    // And un-trust every other device. A password change is often the response
+    // to "I think someone has my login" — leaving other devices able to sign in
+    // on the new password without MFA would undo most of the point.
+    ea::revoke_trust(&state.db, employee.id, ea::read_trust_cookie(&headers).as_deref()).await?;
 
     Ok(Json(json!({ "status": "ok" })))
 }

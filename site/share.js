@@ -29,10 +29,12 @@
     const notes = (s.notes || []).map((n) => `<span class="note-chip">${esc(n)}</span>`).join('')
     /* value carries the API's size code; the label is only for the human. */
     const sizes = [
+      ['Vintage', 'vintage', s.price_vintage],
       ['3.4 oz', 'oz3_4', s.price_oz3_4],
       ['1.7 oz', 'oz1_7', s.price_oz1_7],
+      ['1 oz', 'oz1_2', s.price_oz1_2],
       ['Roller', 'roller', s.price_roller],
-      ['Spray · 10 ml', 'spray', s.price_spray],
+      ['Spray', 'spray', s.price_spray],
     ].filter(([, , v]) => v != null)
     const sizeRows = sizes
       .map(

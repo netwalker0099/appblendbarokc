@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shop — The Blend Bar</title>
+    <meta
+      name="description"
+      content="Shop The Blend Bar's signature scents and gifts, hand-blended in Oklahoma City and shipped to you."
+    />
+    <link rel="icon" type="image/webp" href="/assets/img1.webp" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/shop.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="/" aria-label="The Blend Bar home">
+          <img src="/assets/img1.webp" alt="The Blend Bar monogram" />
+          <span class="name">The Blend Bar</span>
+        </a>
+        <nav class="nav" aria-label="Primary">
+          <div class="actions">
+            <a class="btn ghost" href="/">Home</a>
+            <a class="btn solid" href="#bag" id="bagLink">Bag</a>
+          </div>
+        </nav>
+      </div>
+    </header>
+
+    <main class="shop-page">
+      <div class="wrap">
+        <div class="section-head shop-head" id="shopHead">
+          <p class="eyebrow">The Blend Bar shop</p>
+          <h1>Fragrance, made by hand.</h1>
+          <p>Signature scents and gifts from the bar, shipped to your door.</p>
+        </div>
+
+        <div class="shop-layout">
+          <div class="shop-main">
+            <section class="shop-grid" id="products" aria-label="Products" aria-busy="true">
+              <p class="muted shop-status">Loading the shop…</p>
+            </section>
+            <!-- /shop/<id>: one page per item, filled in by shop.js. -->
+            <section class="shop-detail" id="detail" hidden></section>
+          </div>
+
+          <aside class="bag" id="bag" aria-labelledby="bagTitle">
+            <h2 id="bagTitle">Your bag</h2>
+            <div id="bagBody">
+              <p class="muted">Your bag is empty.</p>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </main>
+
+    <footer class="site-footer" id="footer">
+      <div class="wrap legal">
+        The Blend Bar · Oklahoma City ·
+        <a href="https://www.instagram.com/theblendbar.okc" rel="noopener">@theblendbar.okc</a>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,5 +1,9 @@
 //! Storing the Google service-account key that an admin uploads.
 //!
+//! Only **Google Drive backups** use it (Admin → Backups). Email goes through
+//! the Workspace SMTP relay, which authorises this server by its IP address and
+//! needs no credential at all — see `email::build`.
+//!
 //! The key goes to a file on a mounted volume, never to a database column, so it
 //! stays out of `GET /api/admin/backup` — that endpoint hands an admin a full
 //! pg_dump, and a credential in a table would ride along in every copy of it.

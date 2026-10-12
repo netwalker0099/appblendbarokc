@@ -1,8 +1,6 @@
 # Shared security headers, applied to both vhosts.
 (security_headers) {
 	header {
-		# Force HTTPS for a year (this host is TLS-only via Caddy).
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
@@ -18,6 +16,8 @@
 # Operator app (intake / lookup / admin).
 {$DOMAIN} {
 	import security_headers
+	# Force HTTPS for a year (this host is TLS-only via Caddy).
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
 	handle /api/* {
 		reverse_proxy api:8080
@@ -54,6 +54,7 @@
 # TLS issues automatically once the DNS record for this host resolves.
 sandbox.theblendbarokc.com {
 	import security_headers
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
 	handle /api/* {
 		reverse_proxy api:8080
@@ -64,6 +65,15 @@ sandbox.theblendbarokc.com {
 	handle /s/* {
 		root * /usr/share/blendbar-site
 		rewrite * /share.html
+		file_server
+	}
+
+	# One page per shop item: /shop/<id> serves shop.html, which reads the id
+	# from the path. /shop itself still resolves to shop.html via try_files.
+	handle /shop/* {
+		root * /usr/share/blendbar-site
+		rewrite * /shop.html
+		header Cache-Control "no-cache"
 		file_server
 	}
 
@@ -86,4 +96,51 @@ sandbox.theblendbarokc.com {
 	}
 
 	encode gzip
+}
+
+# Production customer site: a promoted copy of the sandbox (site-prod/, see
+# README "Promoting the sandbox site"). Same API, same routes as the sandbox.
+theblendbarokc.com {
+	import security_headers
+	# No includeSubDomains here: on the apex it would force HTTPS on every
+	# subdomain of the business domain, including ones this box doesn't serve.
+	header Strict-Transport-Security "max-age=31536000"
+
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+
+	handle /s/* {
+		root * /usr/share/blendbar-site-prod
+		rewrite * /share.html
+		file_server
+	}
+
+	# One page per shop item: /shop/<id> serves shop.html, which reads the id
+	# from the path. /shop itself still resolves to shop.html via try_files.
+	handle /shop/* {
+		root * /usr/share/blendbar-site-prod
+		rewrite * /shop.html
+		header Cache-Control "no-cache"
+		file_server
+	}
+
+	handle {
+		root * /usr/share/blendbar-site-prod
+		try_files {path} {path}.html {path}/index.html /index.html
+
+		@img path /assets/*
+		header @img Cache-Control "public, max-age=604800"
+
+		@code not path /assets/*
+		header @code Cache-Control "no-cache"
+
+		file_server
+	}
+
+	encode gzip
+}
+
+www.theblendbarokc.com {
+	redir https://theblendbarokc.com{uri} permanent
 }

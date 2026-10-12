@@ -2,10 +2,11 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 
 use super::{
-    CheckoutHandle, CheckoutPush, CustomerPush, RemotePayment, Square, SquareError,
+    CheckoutHandle, CheckoutPush, CustomerPush, DeviceCode, RemotePayment, Square, SquareError,
+    TerminalCheckout, TerminalCheckoutPush,
 };
 
 /// In-process stand-in for Square, used whenever credentials are absent.
@@ -13,17 +14,20 @@ use super::{
 /// Unlike the old Squarespace mock (which returned a bare id and forgot), this
 /// one keeps state: a checkout records a COMPLETED payment for the cart's total,
 /// as though the customer paid the moment the link was issued. That makes the
-/// whole downstream path — refresh-from-Square, the reconciliation report, the
-/// matched/mismatched buckets — exercisable end to end on a box with no
-/// credentials, which is the only way any of it gets tested before go-live.
+/// whole downstream path — refresh-from-Square and settlement — exercisable end
+/// to end on a box with no credentials.
 ///
-/// State is per-process and lost on restart. That is fine for its purpose and
-/// worth stating plainly: after an API restart the mock will report payments it
-/// previously invented as missing, so reconciliation in mock mode is a logic
-/// test, never a financial one.
+/// Terminal checkouts start PENDING and complete on the first status check, so
+/// the "waiting for the customer" screen is seen at least once. Device codes
+/// pair on the first check, the same way.
+///
+/// State is per-process and lost on restart.
 #[derive(Default)]
 pub struct MockSquare {
     payments: Mutex<HashMap<String, RemotePayment>>,
+    /// Terminal checkouts by id, with the push that created each.
+    terminal: Mutex<HashMap<String, (TerminalCheckout, TerminalCheckoutPush)>>,
+    codes: Mutex<HashMap<String, DeviceCode>>,
 }
 
 impl MockSquare {
@@ -113,19 +117,110 @@ impl Square for MockSquare {
             .cloned())
     }
 
-    async fn list_payments(
+    async fn create_order(&self, push: &CheckoutPush) -> Result<String, SquareError> {
+        if push.line_items.is_empty() {
+            return Err(SquareError::Config("cannot check out an empty cart".into()));
+        }
+        tracing::info!(cart_id = %push.cart_id, "[mock square] create_order");
+        Ok(format!("mock_ord_{}", push.cart_id.simple()))
+    }
+
+    async fn create_terminal_checkout(
         &self,
-        begin: DateTime<Utc>,
-        end: DateTime<Utc>,
-    ) -> Result<Vec<RemotePayment>, SquareError> {
-        Ok(self
-            .payments
-            .lock()
-            .expect("mock payment store poisoned")
-            .values()
-            .filter(|p| p.created_at >= begin && p.created_at <= end)
-            .cloned()
-            .collect())
+        push: &TerminalCheckoutPush,
+    ) -> Result<TerminalCheckout, SquareError> {
+        let mut store = self.terminal.lock().expect("mock terminal store poisoned");
+        // Same key, same checkout — as Square's idempotency does.
+        let id = format!("mock_tc_{}", push.idempotency_key.replace('-', ""));
+        if let Some((existing, _)) = store.get(&id) {
+            return Ok(existing.clone());
+        }
+        let checkout = TerminalCheckout {
+            id: id.clone(),
+            status: "PENDING".into(),
+            payment_ids: Vec::new(),
+            cancel_reason: None,
+        };
+        store.insert(id, (checkout.clone(), push.clone()));
+        tracing::info!(
+            device_id = %push.device_id,
+            amount_cents = push.amount_cents,
+            "[mock square] create_terminal_checkout — no Terminal was contacted"
+        );
+        Ok(checkout)
+    }
+
+    async fn get_terminal_checkout(
+        &self,
+        checkout_id: &str,
+    ) -> Result<TerminalCheckout, SquareError> {
+        let mut store = self.terminal.lock().expect("mock terminal store poisoned");
+        let (checkout, push) = store
+            .get_mut(checkout_id)
+            .ok_or_else(|| SquareError::Config(format!("mock: unknown checkout {checkout_id}")))?;
+        if checkout.status == "PENDING" {
+            // The pretend customer pays the moment anyone looks.
+            let payment_id = format!("mock_pay_{}", checkout_id.trim_start_matches("mock_tc_"));
+            self.record(RemotePayment {
+                payment_id: payment_id.clone(),
+                square_order_id: Some(push.square_order_id.clone()),
+                status: "COMPLETED".into(),
+                amount_cents: push.amount_cents,
+                currency: push.currency.clone(),
+                created_at: Utc::now(),
+                refunded_cents: 0,
+            });
+            checkout.status = "COMPLETED".into();
+            checkout.payment_ids = vec![payment_id];
+        }
+        Ok(checkout.clone())
+    }
+
+    async fn cancel_terminal_checkout(
+        &self,
+        checkout_id: &str,
+    ) -> Result<TerminalCheckout, SquareError> {
+        let mut store = self.terminal.lock().expect("mock terminal store poisoned");
+        let (checkout, _) = store
+            .get_mut(checkout_id)
+            .ok_or_else(|| SquareError::Config(format!("mock: unknown checkout {checkout_id}")))?;
+        if !checkout.is_active() {
+            return Err(SquareError::Api {
+                status: 400,
+                body: format!("BAD_REQUEST: checkout is {}", checkout.status),
+                retryable: false,
+            });
+        }
+        checkout.status = "CANCELED".into();
+        checkout.cancel_reason = Some("SELLER_CANCELED".into());
+        Ok(checkout.clone())
+    }
+
+    async fn create_device_code(&self, name: &str) -> Result<DeviceCode, SquareError> {
+        let mut codes = self.codes.lock().expect("mock code store poisoned");
+        let n = codes.len() + 1;
+        let code = DeviceCode {
+            id: format!("mock_dc_{n}"),
+            code: format!("MOCK{n:02}"),
+            status: "UNPAIRED".into(),
+            device_id: None,
+            pair_by: Some(Utc::now() + chrono::Duration::minutes(5)),
+        };
+        codes.insert(code.id.clone(), code.clone());
+        tracing::info!(name, "[mock square] create_device_code");
+        Ok(code)
+    }
+
+    async fn get_device_code(&self, code_id: &str) -> Result<DeviceCode, SquareError> {
+        let mut codes = self.codes.lock().expect("mock code store poisoned");
+        let code = codes
+            .get_mut(code_id)
+            .ok_or_else(|| SquareError::Config(format!("mock: unknown device code {code_id}")))?;
+        if code.status == "UNPAIRED" {
+            code.status = "PAIRED".into();
+            code.device_id = Some(format!("mock-terminal-{}", code_id.trim_start_matches("mock_dc_")));
+        }
+        Ok(code.clone())
     }
 
     async fn void_checkout(&self, payment_link_id: &str) -> Result<(), SquareError> {
@@ -170,6 +265,7 @@ mod tests {
             discounts: Vec::new(),
             redirect_url: None,
             note: None,
+            ask_for_shipping_address: false,
         }
     }
 
@@ -198,23 +294,61 @@ mod tests {
         let b = sq.create_checkout(&push(cart_id, 6000, 1)).await.unwrap();
 
         assert_eq!(a.square_order_id, b.square_order_id);
-        let all = sq
-            .list_payments(Utc::now() - chrono::Duration::hours(1), Utc::now())
-            .await
-            .unwrap();
-        assert_eq!(all.len(), 1, "same cart must not create a second payment");
+        assert_eq!(
+            sq.payments.lock().unwrap().len(),
+            1,
+            "same cart must not create a second payment"
+        );
+    }
+
+    fn terminal_push(order: &str, key: &str) -> TerminalCheckoutPush {
+        TerminalCheckoutPush {
+            idempotency_key: key.into(),
+            square_order_id: order.into(),
+            amount_cents: 2500,
+            currency: "USD".into(),
+            device_id: "mock-terminal-1".into(),
+            reference_id: "cart".into(),
+            note: None,
+        }
     }
 
     #[tokio::test]
-    async fn list_payments_respects_the_window() {
+    async fn terminal_checkout_pays_the_order_it_was_sent_for() {
         let sq = MockSquare::default();
-        sq.create_checkout(&push(Uuid::new_v4(), 100, 1))
-            .await
-            .unwrap();
+        let order = sq.create_order(&push(Uuid::new_v4(), 2500, 1)).await.unwrap();
+        let tc = sq.create_terminal_checkout(&terminal_push(&order, "k1")).await.unwrap();
+        assert_eq!(tc.status, "PENDING");
 
-        let past_start = Utc::now() - chrono::Duration::days(10);
-        let past_end = Utc::now() - chrono::Duration::days(9);
-        assert!(sq.list_payments(past_start, past_end).await.unwrap().is_empty());
+        let done = sq.get_terminal_checkout(&tc.id).await.unwrap();
+        assert_eq!(done.status, "COMPLETED");
+        let payment = sq.get_payment(&done.payment_ids[0]).await.unwrap();
+        assert_eq!(payment.square_order_id.as_deref(), Some(order.as_str()));
+        assert_eq!(payment.amount_cents, 2500);
+    }
+
+    #[tokio::test]
+    async fn terminal_checkout_is_idempotent_and_cancelable_only_while_active() {
+        let sq = MockSquare::default();
+        let a = sq.create_terminal_checkout(&terminal_push("o", "same")).await.unwrap();
+        let b = sq.create_terminal_checkout(&terminal_push("o", "same")).await.unwrap();
+        assert_eq!(a.id, b.id, "a retried send must not put a second checkout on the device");
+
+        let canceled = sq.cancel_terminal_checkout(&a.id).await.unwrap();
+        assert_eq!(canceled.status, "CANCELED");
+        assert!(sq.cancel_terminal_checkout(&a.id).await.is_err());
+        // A canceled checkout stays canceled — looking at it doesn't pay it.
+        assert_eq!(sq.get_terminal_checkout(&a.id).await.unwrap().status, "CANCELED");
+    }
+
+    #[tokio::test]
+    async fn device_code_pairs_on_first_check() {
+        let sq = MockSquare::default();
+        let code = sq.create_device_code("Bar").await.unwrap();
+        assert_eq!(code.status, "UNPAIRED");
+        let paired = sq.get_device_code(&code.id).await.unwrap();
+        assert_eq!(paired.status, "PAIRED");
+        assert!(paired.device_id.is_some());
     }
 
     #[tokio::test]

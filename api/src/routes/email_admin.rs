@@ -5,9 +5,14 @@
 //! from a browser, while the things a person legitimately changes — who the mail
 //! comes from, whether the optional messages are on — live in the database.
 //!
-//! Relay host and password are therefore absent from every response here. What
-//! the panel gets instead is whether a relay is configured at all, which is
-//! enough to tell someone why nothing is arriving.
+//! The relay password is therefore absent from every response here. The host,
+//! port and which kind of authorisation is in play do come back: they are not
+//! secrets, and they are what tells someone why nothing is arriving.
+//!
+//! Google service-account keys are not handled here at all. Email sends through
+//! the Workspace SMTP relay, which authorises this server by IP and needs no
+//! credential; the only thing that still uses a key is Google Drive backups, and
+//! it is configured under Admin → Backups.
 
 use axum::extract::State;
 use axum::Json;
@@ -54,33 +59,14 @@ pub async fn get(
         by_status.insert(status, json!(n));
     }
 
-    // Which Google identity is in play, if any. The private key is never read
-    // back out — only the service-account address, which is not a secret.
-    let google_account = crate::email::credentials::load_stored()
-        .and_then(|r| r.ok())
-        .map(|a| a.client_email);
-
-    let impersonate: Option<String> =
-        sqlx::query_scalar("select google_impersonate from email_settings where id = true")
-            .fetch_optional(&state.db)
-            .await?
-            .flatten();
-
     Ok(Json(json!({
         "settings": settings,
-        // Whether a transport is wired up at all. Hosts, keys and passwords are
-        // deliberately never included.
         "transport": state.mailer().name(),
         "live": state.mailer().is_live(),
         "counts": by_status,
-        "google": {
-            // True when the key comes from the server environment, in which case
-            // the browser must not pretend it can change it.
-            "env_managed": crate::email::credentials::env_managed(),
-            "connected": google_account.is_some() || crate::email::credentials::env_managed(),
-            "service_account": google_account,
-            "impersonate": impersonate,
-        },
+        // Where mail goes and how this server authorises there. Never the
+        // password, which stays in the environment like every other secret.
+        "relay": crate::email::relay_status(),
     })))
 }
 
@@ -151,95 +137,6 @@ pub async fn update(
     .await?;
 
     Ok(Json(settings))
-}
-
-#[derive(Deserialize)]
-pub struct ConnectGoogle {
-    /// The downloaded service-account JSON, pasted whole.
-    pub service_account_json: String,
-    /// The Workspace mailbox to send as.
-    pub impersonate: String,
-}
-
-/// Store a Google service-account key and start using it immediately.
-///
-/// The key is written to a file on a mounted volume, **not** to a database
-/// column — `GET /api/admin/backup` hands an admin a full pg_dump, and a
-/// credential in a table would ride along in every copy of it. It is never read
-/// back out to a browser; the panel only ever sees the service-account address.
-pub async fn connect_google(
-    _admin: AdminEmployee,
-    State(state): State<AppState>,
-    Json(body): Json<ConnectGoogle>,
-) -> Result<Json<Value>, AppError> {
-    if crate::email::credentials::env_managed() {
-        return Err(AppError::Conflict(
-            "a Google key is configured in the server environment, which takes \
-             precedence. Remove GOOGLE_SA_KEY_FILE / GOOGLE_SA_KEY_JSON from .env \
-             to manage it from here instead."
-                .into(),
-        ));
-    }
-
-    let impersonate = body.impersonate.trim().to_lowercase();
-    if !looks_like_an_address(&impersonate) {
-        return Err(AppError::BadRequest(
-            "enter the Workspace mailbox to send as, e.g. hello@theblendbarokc.com".into(),
-        ));
-    }
-
-    // Validated and written before anything is switched over, so a bad paste
-    // leaves the previous working setup untouched.
-    let account = crate::email::credentials::store(&body.service_account_json)
-        .map_err(|e| AppError::BadRequest(e.to_string()))?;
-
-    sqlx::query("update email_settings set google_impersonate = $1, updated_at = now() where id = true")
-        .bind(&impersonate)
-        .execute(&state.db)
-        .await?;
-
-    // Swap the live mailer so this takes effect without a restart.
-    state.set_mailer(crate::email::build(Some(impersonate.clone())));
-
-    let live = state.mailer().is_live();
-    tracing::info!(
-        service_account = %account.client_email,
-        sending_as = %impersonate,
-        "google credentials stored via admin"
-    );
-
-    Ok(Json(json!({
-        "ok": live,
-        "service_account": account.client_email,
-        "impersonate": impersonate,
-        "detail": if live {
-            "Connected. Send a test to confirm the delegation is authorised."
-        } else {
-            "Saved, but the mailer did not come up — check the server logs."
-        },
-    })))
-}
-
-/// Forget the stored key and fall back to whatever else is configured.
-pub async fn disconnect_google(
-    _admin: AdminEmployee,
-    State(state): State<AppState>,
-) -> Result<Json<Value>, AppError> {
-    let removed = crate::email::credentials::remove_stored()
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
-    let impersonate: Option<String> =
-        sqlx::query_scalar("select google_impersonate from email_settings where id = true")
-            .fetch_optional(&state.db)
-            .await?
-            .flatten();
-
-    state.set_mailer(crate::email::build(impersonate));
-
-    Ok(Json(json!({
-        "removed": removed,
-        "live": state.mailer().is_live(),
-    })))
 }
 
 #[derive(Deserialize)]

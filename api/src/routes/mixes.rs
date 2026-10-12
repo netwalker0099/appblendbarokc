@@ -96,6 +96,7 @@ pub async fn update(
                 return Err(AppError::BadRequest("amount_ml must be positive".into()));
             }
         }
+        crate::models::mix::check_formula_total(items.iter().map(|i| i.amount_ml))?;
     }
 
     let mut tx = state.db.begin().await?;

@@ -4,7 +4,8 @@ use reqwest::Client;
 use serde_json::{json, Value};
 
 use super::{
-    CheckoutHandle, CheckoutPush, CustomerPush, RemotePayment, Square, SquareConfig, SquareError,
+    CheckoutHandle, CheckoutPush, CustomerPush, DeviceCode, RemotePayment, Square, SquareConfig,
+    SquareError, TerminalCheckout, TerminalCheckoutPush,
 };
 
 /// Pinned Square API version. Square dates its API and keeps old versions working;
@@ -13,19 +14,11 @@ use super::{
 const SQUARE_VERSION: &str = "2025-01-23";
 const USER_AGENT: &str = "blendbar-app/0.2";
 
-/// Guard against an unbounded pagination loop if a cursor ever fails to advance.
-/// 100 pages x 100 payments is far more than a season of stand sales.
-const MAX_PAGES: usize = 100;
-
 /// Live Square client.
 ///
-/// ⚠️ The request/response shapes here follow Square's documented Connect v2 API
-/// but have NOT been exercised against the live service from this box — no
-/// credentials exist here yet. Before taking real money, run the checklist in
-/// README ("Going live on Square"): point it at Square **Sandbox** first, take a
-/// test payment with a Square test card, and confirm the reconciliation report
-/// matches the Square dashboard. The mock backend covers the local logic; only
-/// the wire format needs that confirmation.
+/// The payment-link path was verified against Square Sandbox on 2026-10-01, and
+/// the Terminal path on 2026-10-08 using Square's Sandbox test devices. Neither
+/// has yet taken a production payment.
 pub struct HttpSquare {
     client: Client,
     config: SquareConfig,
@@ -82,6 +75,55 @@ impl HttpSquare {
 
     async fn get(&self, path: &str) -> Result<Value, SquareError> {
         self.send(self.client.get(self.url(path))).await
+    }
+
+    /// The Square order for a cart: its lines, discounts and our cart id. Shared
+    /// by the payment link (which wraps it) and the Terminal path (which creates
+    /// it on its own), so both send Square exactly the same order.
+    fn order_body(&self, push: &CheckoutPush) -> Value {
+        let line_items: Vec<Value> = push
+            .line_items
+            .iter()
+            .map(|li| {
+                json!({
+                    "name": li.name,
+                    // Square wants quantity as a string. Yes, really.
+                    "quantity": li.quantity.to_string(),
+                    "base_price_money": {
+                        "amount": li.unit_amount_cents,
+                        "currency": push.currency,
+                    },
+                })
+            })
+            .collect();
+
+        let mut order = json!({
+            "location_id": self.config.location_id,
+            // Our cart id: given any Square order we can name the local
+            // cart that produced it.
+            "reference_id": push.cart_id.to_string(),
+            "line_items": line_items,
+        });
+        if let Some(note) = &push.note {
+            order["note"] = json!(note);
+        }
+
+        // Square has no negative line items; a reduction is an order-level
+        // discount with a FIXED_AMOUNT type.
+        if !push.discounts.is_empty() {
+            order["discounts"] = json!(push
+                .discounts
+                .iter()
+                .map(|d| json!({
+                    "name": d.name,
+                    "type": "FIXED_AMOUNT",
+                    "amount_money": { "amount": d.amount_cents, "currency": push.currency },
+                    "scope": "ORDER",
+                }))
+                .collect::<Vec<_>>());
+        }
+
+        order
     }
 }
 
@@ -158,6 +200,42 @@ fn parse_payment(p: &Value) -> Result<RemotePayment, SquareError> {
     })
 }
 
+/// `{"checkout": {...}}` from any of the Terminal checkout endpoints.
+fn parse_terminal_checkout(resp: &Value) -> Result<TerminalCheckout, SquareError> {
+    let c = resp
+        .get("checkout")
+        .ok_or_else(|| SquareError::Config(format!("no checkout in response: {resp}")))?;
+    let text = |k: &str| c.get(k).and_then(Value::as_str).map(str::to_string);
+    Ok(TerminalCheckout {
+        id: text("id")
+            .ok_or_else(|| SquareError::Config(format!("terminal checkout has no id: {c}")))?,
+        status: text("status").unwrap_or_else(|| "UNKNOWN".into()),
+        payment_ids: c
+            .get("payment_ids")
+            .and_then(Value::as_array)
+            .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .unwrap_or_default(),
+        cancel_reason: text("cancel_reason"),
+    })
+}
+
+/// `{"device_code": {...}}` from the Devices API.
+fn parse_device_code(resp: &Value) -> Result<DeviceCode, SquareError> {
+    let d = resp
+        .get("device_code")
+        .ok_or_else(|| SquareError::Config(format!("no device_code in response: {resp}")))?;
+    let text = |k: &str| d.get(k).and_then(Value::as_str).map(str::to_string);
+    Ok(DeviceCode {
+        id: text("id").ok_or_else(|| SquareError::Config(format!("device code has no id: {d}")))?,
+        code: text("code").unwrap_or_default(),
+        status: text("status").unwrap_or_else(|| "UNKNOWN".into()),
+        device_id: text("device_id"),
+        pair_by: text("pair_by")
+            .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+            .map(|dt| dt.with_timezone(&Utc)),
+    })
+}
+
 #[async_trait]
 impl Square for HttpSquare {
     fn name(&self) -> &'static str {
@@ -176,48 +254,7 @@ impl Square for HttpSquare {
             return Err(SquareError::Config("cannot check out an empty cart".into()));
         }
 
-        let line_items: Vec<Value> = push
-            .line_items
-            .iter()
-            .map(|li| {
-                json!({
-                    "name": li.name,
-                    // Square wants quantity as a string. Yes, really.
-                    "quantity": li.quantity.to_string(),
-                    "base_price_money": {
-                        "amount": li.unit_amount_cents,
-                        "currency": push.currency,
-                    },
-                })
-            })
-            .collect();
-
-        let mut order = json!({
-            "location_id": self.config.location_id,
-            // Our cart id. This is the anchor for reconciliation: given any
-            // Square order we can name the local cart that produced it.
-            "reference_id": push.cart_id.to_string(),
-            "line_items": line_items,
-        });
-        if let Some(note) = &push.note {
-            order["note"] = json!(note);
-        }
-
-        // Square has no negative line items; a reduction is an order-level
-        // discount with a FIXED_AMOUNT type.
-        if !push.discounts.is_empty() {
-            order["discounts"] = json!(push
-                .discounts
-                .iter()
-                .map(|d| json!({
-                    "name": d.name,
-                    "type": "FIXED_AMOUNT",
-                    "amount_money": { "amount": d.amount_cents, "currency": push.currency },
-                    "scope": "ORDER",
-                }))
-                .collect::<Vec<_>>());
-        }
-
+        let order = self.order_body(push);
         let mut body = json!({
             // Square dedups creates on this key for 24h, so a retried call after
             // a network timeout returns the original link rather than a second one.
@@ -229,11 +266,12 @@ impl Square for HttpSquare {
             .redirect_url
             .as_ref()
             .or(self.config.redirect_url.as_ref());
-        if let Some(url) = redirect {
-            body["checkout_options"] = json!({
-                "redirect_url": url,
-                "ask_for_shipping_address": false,
-            });
+        if redirect.is_some() || push.ask_for_shipping_address {
+            let mut options = json!({ "ask_for_shipping_address": push.ask_for_shipping_address });
+            if let Some(url) = redirect {
+                options["redirect_url"] = json!(url);
+            }
+            body["checkout_options"] = options;
         }
         if let Some(email) = &push.buyer_email {
             body["pre_populated_data"] = json!({ "buyer_email": email });
@@ -291,49 +329,92 @@ impl Square for HttpSquare {
         }
     }
 
-    async fn list_payments(
-        &self,
-        begin: DateTime<Utc>,
-        end: DateTime<Utc>,
-    ) -> Result<Vec<RemotePayment>, SquareError> {
-        let mut out = Vec::new();
-        let mut cursor: Option<String> = None;
-
-        for page in 0..MAX_PAGES {
-            let mut path = format!(
-                "/v2/payments?begin_time={}&end_time={}&location_id={}&limit=100",
-                urlencoding(&begin.to_rfc3339()),
-                urlencoding(&end.to_rfc3339()),
-                urlencoding(&self.config.location_id),
-            );
-            if let Some(c) = &cursor {
-                path.push_str(&format!("&cursor={}", urlencoding(c)));
-            }
-
-            let resp = self.get(&path).await?;
-
-            if let Some(payments) = resp.get("payments").and_then(Value::as_array) {
-                for p in payments {
-                    out.push(parse_payment(p)?);
-                }
-            }
-
-            match resp.get("cursor").and_then(Value::as_str) {
-                Some(next) if !next.is_empty() => cursor = Some(next.to_string()),
-                // No cursor means this was the last page — the normal exit.
-                _ => return Ok(out),
-            }
-
-            if page == MAX_PAGES - 1 {
-                // Truncating silently would understate Square's side and invent
-                // "missing in Square" discrepancies. Refuse instead.
-                return Err(SquareError::Config(format!(
-                    "list_payments exceeded {MAX_PAGES} pages for {begin}..{end}; \
-                     narrow the reconciliation window"
-                )));
-            }
+    async fn create_order(&self, push: &CheckoutPush) -> Result<String, SquareError> {
+        if push.line_items.is_empty() {
+            return Err(SquareError::Config("cannot check out an empty cart".into()));
         }
-        Ok(out)
+        let resp = self
+            .post(
+                "/v2/orders",
+                json!({
+                    "idempotency_key": push.idempotency_key,
+                    "order": self.order_body(push),
+                }),
+            )
+            .await?;
+        resp.get("order")
+            .and_then(|o| o.get("id"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| SquareError::Config(format!("no order id in response: {resp}")))
+    }
+
+    async fn create_terminal_checkout(
+        &self,
+        push: &TerminalCheckoutPush,
+    ) -> Result<TerminalCheckout, SquareError> {
+        let mut checkout = json!({
+            "amount_money": { "amount": push.amount_cents, "currency": push.currency },
+            "order_id": push.square_order_id,
+            "reference_id": push.reference_id,
+            "device_options": { "device_id": push.device_id },
+        });
+        if let Some(note) = &push.note {
+            // Square caps the note at 500 characters.
+            checkout["note"] = json!(note.chars().take(500).collect::<String>());
+        }
+        let resp = self
+            .post(
+                "/v2/terminals/checkouts",
+                json!({ "idempotency_key": push.idempotency_key, "checkout": checkout }),
+            )
+            .await?;
+        parse_terminal_checkout(&resp)
+    }
+
+    async fn get_terminal_checkout(
+        &self,
+        checkout_id: &str,
+    ) -> Result<TerminalCheckout, SquareError> {
+        let resp = self
+            .get(&format!("/v2/terminals/checkouts/{checkout_id}"))
+            .await?;
+        parse_terminal_checkout(&resp)
+    }
+
+    async fn cancel_terminal_checkout(
+        &self,
+        checkout_id: &str,
+    ) -> Result<TerminalCheckout, SquareError> {
+        let resp = self
+            .post(
+                &format!("/v2/terminals/checkouts/{checkout_id}/cancel"),
+                json!({}),
+            )
+            .await?;
+        parse_terminal_checkout(&resp)
+    }
+
+    async fn create_device_code(&self, name: &str) -> Result<DeviceCode, SquareError> {
+        let resp = self
+            .post(
+                "/v2/devices/codes",
+                json!({
+                    "idempotency_key": uuid::Uuid::new_v4().to_string(),
+                    "device_code": {
+                        "name": name,
+                        "product_type": "TERMINAL_API",
+                        "location_id": self.config.location_id,
+                    },
+                }),
+            )
+            .await?;
+        parse_device_code(&resp)
+    }
+
+    async fn get_device_code(&self, code_id: &str) -> Result<DeviceCode, SquareError> {
+        let resp = self.get(&format!("/v2/devices/codes/{code_id}")).await?;
+        parse_device_code(&resp)
     }
 
     async fn void_checkout(&self, payment_link_id: &str) -> Result<(), SquareError> {
@@ -402,36 +483,9 @@ impl Square for HttpSquare {
     }
 }
 
-/// Minimal percent-encoding for query values (timestamps contain `+` and `:`,
-/// cursors are opaque base64-ish blobs). Avoids pulling in a dependency for the
-/// handful of characters that actually occur here.
-fn urlencoding(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn urlencodes_timestamp_reserved_characters() {
-        // A naive format! would leave `+` in, which a server reads as a space —
-        // silently shifting the reconciliation window by the UTC offset.
-        assert_eq!(
-            urlencoding("2026-07-27T10:00:00+00:00"),
-            "2026-07-27T10%3A00%3A00%2B00%3A00"
-        );
-        assert_eq!(urlencoding("abc-123_x.y~z"), "abc-123_x.y~z");
-    }
 
     #[test]
     fn summarizes_square_error_envelopes() {
@@ -461,6 +515,47 @@ mod tests {
         assert_eq!(p.refunded_cents, 500);
         assert!(p.is_completed());
         assert!(p.is_refunded());
+    }
+
+    #[test]
+    fn parses_a_completed_terminal_checkout() {
+        let v = serde_json::json!({ "checkout": {
+            "id": "tc_1", "status": "COMPLETED",
+            "payment_ids": ["pay_1"],
+            "amount_money": { "amount": 2500, "currency": "USD" }
+        }});
+        let c = parse_terminal_checkout(&v).unwrap();
+        assert_eq!(c.id, "tc_1");
+        assert_eq!(c.payment_ids, vec!["pay_1".to_string()]);
+        assert!(!c.is_active());
+        assert!(c.cancel_reason.is_none());
+    }
+
+    #[test]
+    fn parses_a_canceled_terminal_checkout() {
+        let v = serde_json::json!({ "checkout": {
+            "id": "tc_2", "status": "CANCELED", "cancel_reason": "BUYER_CANCELED"
+        }});
+        let c = parse_terminal_checkout(&v).unwrap();
+        assert!(c.payment_ids.is_empty());
+        assert_eq!(c.cancel_reason.as_deref(), Some("BUYER_CANCELED"));
+    }
+
+    #[test]
+    fn parses_a_device_code_before_and_after_pairing() {
+        let unpaired = serde_json::json!({ "device_code": {
+            "id": "dc_1", "code": "JHHYHH", "status": "UNPAIRED",
+            "product_type": "TERMINAL_API", "pair_by": "2026-10-08T12:05:00Z"
+        }});
+        let d = parse_device_code(&unpaired).unwrap();
+        assert_eq!(d.code, "JHHYHH");
+        assert!(d.device_id.is_none());
+        assert!(d.pair_by.is_some());
+
+        let paired = serde_json::json!({ "device_code": {
+            "id": "dc_1", "code": "JHHYHH", "status": "PAIRED", "device_id": "dev_9"
+        }});
+        assert_eq!(parse_device_code(&paired).unwrap().device_id.as_deref(), Some("dev_9"));
     }
 
     #[test]

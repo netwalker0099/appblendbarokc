@@ -2,10 +2,15 @@
 /**
  * Email configuration.
  *
- * Relay host and credentials are NOT here on purpose — they live in the server's
+ * The relay itself is NOT configurable here — it lives in the server's
  * environment, like the Square and chat secrets. What this panel controls is who
  * the mail appears to come from and which optional messages are on, plus a test
  * button so email can be proved before a customer depends on it.
+ *
+ * It shows where mail goes and how the server authorises there, because that is
+ * what someone needs when nothing is arriving. There is nothing to connect and
+ * no key to paste: the Workspace relay authorises this server by its IP address.
+ * The Google key that Drive backups use lives under Admin → Backups.
  */
 import { computed, reactive, ref, watch } from 'vue'
 
@@ -24,8 +29,6 @@ const form = reactive({
   order_ready_enabled: true,
 })
 const testTo = ref('')
-const saJson = ref('')
-const impersonate = ref('')
 const busy = ref('')
 const error = ref('')
 const notice = ref('')
@@ -38,57 +41,16 @@ watch(
     form.from_name = s.settings.from_name ?? ''
     form.reply_to = s.settings.reply_to ?? ''
     form.order_ready_enabled = s.settings.order_ready_enabled
-    impersonate.value = s.google?.impersonate ?? ''
   },
   { immediate: true, deep: true },
 )
 
 const live = computed(() => Boolean(props.state?.live))
-const google = computed(() => props.state?.google ?? {})
-// When the key comes from the server's .env the browser must not pretend it can
-// change it — two sources of truth for a credential is how they drift apart.
-const envManaged = computed(() => Boolean(google.value.env_managed))
+const relay = computed(() => props.state?.relay ?? null)
+// The relay authorises this server by IP, so there is no credential on the box
+// at all. Worth stating on the page: it is the answer to "where is the key?".
+const keyless = computed(() => relay.value?.auth === 'ip-allowlist')
 
-async function connectGoogle() {
-  if (!saJson.value.trim() || !impersonate.value.trim()) {
-    error.value = 'Paste the service account key and enter the mailbox to send as.'
-    return
-  }
-  busy.value = 'google'
-  error.value = ''
-  notice.value = ''
-  try {
-    const res = await api.connectGoogle({
-      service_account_json: saJson.value,
-      impersonate: impersonate.value.trim(),
-    })
-    // Cleared immediately: the key is stored server-side and there is no reason
-    // for it to sit in the page afterwards.
-    saJson.value = ''
-    notice.value = res.detail
-    emit('changed')
-  } catch (err) {
-    error.value = err.message
-  } finally {
-    busy.value = ''
-  }
-}
-
-async function disconnectGoogle() {
-  if (!window.confirm('Disconnect Google? Email will stop sending until it is reconnected.')) return
-  busy.value = 'google'
-  error.value = ''
-  notice.value = ''
-  try {
-    await api.disconnectGoogle()
-    notice.value = 'Google disconnected.'
-    emit('changed')
-  } catch (err) {
-    error.value = err.message
-  } finally {
-    busy.value = ''
-  }
-}
 const needsFrom = computed(() => !props.state?.settings?.from_address)
 
 async function save() {
@@ -173,77 +135,34 @@ function formatTime(value) {
 
     <hr style="border: 0; border-top: 1px solid var(--border); margin: 1.2rem 0" />
 
-    <h3 style="margin-bottom: 0.6rem">Google connection</h3>
+    <h3 style="margin-bottom: 0.6rem">How mail is sent</h3>
 
-    <dl class="summary" v-if="google.connected">
-      <dt>Service account</dt>
-      <dd><code>{{ google.service_account || 'set in the server environment' }}</code></dd>
-      <dt>Sending as</dt>
-      <dd><code>{{ google.impersonate || '—' }}</code></dd>
+    <dl class="summary" v-if="relay">
+      <dt>Relay</dt>
+      <dd><code>{{ relay.host }}:{{ relay.port }}</code></dd>
+      <dt>Authorised by</dt>
+      <dd>
+        <span class="badge" :class="keyless ? 'ok-badge' : ''">
+          {{ keyless ? 'This server’s IP address' : 'SMTP login' }}
+        </span>
+      </dd>
     </dl>
-
-    <p class="muted" v-if="envManaged">
-      The key is configured in the server’s <code>.env</code>, which takes
-      precedence over anything set here. Remove <code>GOOGLE_SA_KEY_FILE</code> to
-      manage it from this page instead.
+    <p class="muted field-help" v-if="relay && keyless">
+      Nothing to configure here and no key to paste: Google recognises this
+      server by its IP address, so there is no credential stored on the box.
+      The allowlist lives in Google Admin → Apps → Google Workspace → Gmail →
+      Routing → <strong>SMTP relay service</strong>. If mail stops with a
+      <code>550 5.7.0</code> about an unregistered IP, that entry is what to
+      check — most often because the server’s address changed.
     </p>
-
-    <template v-else>
-      <div class="field">
-        <label>Send as (Workspace mailbox)</label>
-        <input
-          v-model="impersonate"
-          type="email"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="hello@theblendbarokc.com"
-        />
-      </div>
-
-      <div class="field">
-        <label>Service account key (JSON)</label>
-        <textarea
-          v-model="saJson"
-          rows="5"
-          spellcheck="false"
-          autocomplete="off"
-          :placeholder="google.connected
-            ? 'Paste a new key here only if you are replacing the current one'
-            : 'Paste the whole downloaded JSON key file'"
-        ></textarea>
-      </div>
-      <p class="muted field-help">
-        Google Cloud → enable the <strong>Gmail API</strong> → create a
-        <strong>service account</strong> → Keys → Add key → JSON. Then in Google
-        Admin → Security → API controls → <strong>Domain-wide delegation</strong>,
-        authorise that service account’s client ID for the single scope
-        <code>https://www.googleapis.com/auth/gmail.send</code>.
-        The key is stored on the server as a file — never in the database, so it
-        can’t end up inside a downloaded backup — and is never shown again here.
-      </p>
-
-      <div class="row" style="gap: 0.5rem">
-        <button
-          class="ghost"
-          type="button"
-          style="flex: none"
-          :disabled="busy === 'google'"
-          @click="connectGoogle"
-        >
-          {{ busy === 'google' ? 'Connecting…' : google.connected ? 'Replace key' : 'Connect Google' }}
-        </button>
-        <button
-          v-if="google.connected"
-          class="ghost"
-          type="button"
-          style="flex: none"
-          :disabled="busy === 'google'"
-          @click="disconnectGoogle"
-        >
-          Disconnect
-        </button>
-      </div>
-    </template>
+    <p class="muted field-help" v-else-if="relay">
+      The relay is authorised with an SMTP login held in the server’s
+      environment, so it is not shown or editable here.
+    </p>
+    <p class="muted danger-text" v-else>
+      No relay is configured, so nothing is being sent. Set <code>SMTP_HOST</code>
+      in the server’s <code>.env</code> and restart the API.
+    </p>
 
     <hr style="border: 0; border-top: 1px solid var(--border); margin: 1.2rem 0" />
 

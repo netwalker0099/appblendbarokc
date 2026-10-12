@@ -30,7 +30,7 @@ use crate::square::{CheckoutPush, LineItemPush};
 use crate::AppState;
 
 /// The cart's discount, as Square wants it. Empty when there is none.
-fn discount_push(cart: &Cart) -> Vec<crate::square::DiscountPush> {
+pub(crate) fn discount_push(cart: &Cart) -> Vec<crate::square::DiscountPush> {
     if cart.discount_cents <= 0 {
         return Vec::new();
     }
@@ -380,6 +380,7 @@ pub async fn checkout(
         discounts: discount_push(&cart),
         redirect_url: None,
         note: cart.note.clone(),
+        ask_for_shipping_address: false,
     };
 
     let handle = state.square.create_checkout(&push).await.map_err(|e| {
@@ -398,6 +399,7 @@ pub async fn checkout(
         r#"
         update carts set
             status = 'pending_payment',
+            payment_method = 'link',
             square_order_id = $2,
             square_payment_link_id = $3,
             checkout_url = $4,

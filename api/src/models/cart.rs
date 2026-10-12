@@ -50,6 +50,16 @@ pub struct Cart {
     pub square_payment_link_id: Option<String>,
     pub square_payment_id: Option<String>,
     pub checkout_url: Option<String>,
+    /// `link` (hosted page / QR) or `terminal` (Square Terminal). Null until the
+    /// cart is first sent to Square.
+    pub payment_method: Option<String>,
+    /// The Terminal checkout currently or last sent for this cart.
+    pub terminal_checkout_id: Option<String>,
+    pub terminal_device_id: Option<String>,
+    /// Square's Terminal checkout status: PENDING, IN_PROGRESS,
+    /// CANCEL_REQUESTED, CANCELED or COMPLETED.
+    pub terminal_status: Option<String>,
+    pub terminal_cancel_reason: Option<String>,
     /// Reused on every Square create call for this cart so a retry after a
     /// timeout returns the original payment link. Internal — never sent to a
     /// browser, since replaying it would let a client steer Square's dedup.
