@@ -22,15 +22,10 @@ Milestone 17 (Square Terminal, 2026-10-08).
 - [x] **Buy a Square Terminal** (the standalone Wi-Fi unit, not a Reader/puck).
   The app charges it from any browser — laptop or iPad — so no iPad is required.
   Purchased (confirmed 2026-10-12).
-- [ ] **OAuth with least-privilege permissions** (replaces the personal access
-  token, which carries every permission). The exact list is in README →
-  "Square permissions". Needs from the owner: the Square application's
-  **production application id + secret** (entered into `.env` by the owner, never
-  pasted into chat), and a decision on whether contact sync to Square Customers
-  stays (it alone needs `CUSTOMERS_READ/WRITE`).
-  2026-10-12: `.env` has `SQUARE_OAUTH_APPLICATION_ID` (ok) and
-  `SQUARE_OAUTH_APPLICATION_SECRET` (`sq0csp-…`), both checked by format. Still
-  to do: the contact-sync decision, then build the "Connect Square" flow.
+- [x] **OAuth with least-privilege permissions**: built and deployed 2026-10-12
+  as **Connect Square** (README → "Connect Square (OAuth)", RESUME → Milestone
+  18). Production app id + secret are in `.env`; contact sync kept, so
+  `CUSTOMERS_READ/WRITE` are included. Dormant until `SQUARE_ENV=production`.
 
 - [x] **`chmod 600 /opt/app/.env`.** It is `644`; it now holds the Square token.
 - [x] **Square sandbox webhooks.** Developer dashboard → Sandbox → Webhooks →
@@ -54,8 +49,23 @@ Milestone 17 (Square Terminal, 2026-10-08).
   uncommitted. Commit the guard + docs on their own.
   Done 2026-10-12: the guard + docs were already in `bac483e` (2026-10-01); the
   rest is `38ad145`, together with `site-prod/` (web/Dockerfile copies it in).
-- [ ] **Go live on Square** (after the above): production credentials (OAuth) +
-  location, `SQUARE_ENV=production`, pair the real Terminal from Admin → Billing,
-  one small real Terminal payment and refund, then test a
-  share-link purchase and a shop order with shipping — check the address appears on
-  the Square order (public and shop checkout turn on automatically in production).
+- [ ] **Look at the live site in a browser**, on desktop and phone:
+  `theblendbarokc.com` and `/shop`. If anything is wrong, `site-prod/` is in git
+  (commit before `c781ca4`) to roll back.
+- [ ] **Go live on Square**, in this order:
+  1. Developer Dashboard → the app → **Production** → OAuth: set Redirect URL to
+     `https://app.theblendbarokc.com/api/square/oauth/callback` (exactly).
+  2. Production → Webhooks: subscribe the same URL to the same seven events as
+     sandbox; the owner replaces `SQUARE_WEBHOOK_SIGNATURE_KEY` in `.env` with
+     the **production** subscription's key.
+  3. Owner sets in `.env`: `SQUARE_ENV=production`, `SQUARE_LOCATION_ID` = the
+     production location (Developer Dashboard → Locations, Production), and
+     deletes the `SQUARE_ACCESS_TOKEN` line (the sandbox token; ignored anyway).
+  4. `docker compose up -d api`; log should say `auth="oauth"` and "not
+     connected yet". Admin → Billing → **Connect Square** → approve. Check the
+     permissions shown match README → "Square permissions".
+  5. Pair the real Terminal (Admin → Billing → Get a pairing code).
+  6. One small real Terminal payment, then refund it in the Square Dashboard;
+     confirm the cart goes paid → refunded.
+  7. A share-link purchase and a shop order with shipping — check the address
+     appears on the Square order (public and shop checkout open automatically).

@@ -56,6 +56,9 @@ const AUDITED_READS: &[&str] = &[
     // A full export of every customer record. Nothing else in the system marks
     // that it happened.
     "/api/admin/backup",
+    // Connect Square lands here: the moment this app gains a token on the
+    // business's Square account. Only the path is stored, never the code.
+    "/api/square/oauth/callback",
 ];
 
 /// Key names whose values are replaced with a marker before storage.

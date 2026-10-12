@@ -11,7 +11,7 @@ use super::{
 /// Pinned Square API version. Square dates its API and keeps old versions working;
 /// pinning means a Square-side release cannot change response shapes under us.
 /// Bump deliberately, after reading their changelog — never leave this unset.
-const SQUARE_VERSION: &str = "2025-01-23";
+pub(super) const SQUARE_VERSION: &str = "2025-01-23";
 const USER_AGENT: &str = "blendbar-app/0.2";
 
 /// Live Square client.
@@ -40,9 +40,22 @@ impl HttpSquare {
         format!("{}{}", self.config.env.base_url(), path)
     }
 
+    /// The token to send, read fresh each call: OAuth renews it while the
+    /// process runs, and Connect Square installs the first one.
+    fn token(&self) -> Option<std::sync::Arc<str>> {
+        self.config.token.read().expect("square token lock poisoned").clone()
+    }
+
     async fn send(&self, req: reqwest::RequestBuilder) -> Result<Value, SquareError> {
+        let token = self.token().ok_or_else(|| {
+            SquareError::Config(
+                "Square is not connected — an admin needs to press Connect Square in \
+                 Admin → Billing"
+                    .into(),
+            )
+        })?;
         let resp = req
-            .bearer_auth(&self.config.access_token)
+            .bearer_auth(&*token)
             .header("Square-Version", SQUARE_VERSION)
             .send()
             .await
@@ -129,7 +142,7 @@ impl HttpSquare {
 
 /// Pull `errors[].detail` out of a Square error envelope, falling back to the raw
 /// body if it isn't shaped as expected.
-fn summarize_errors(text: &str) -> String {
+pub(super) fn summarize_errors(text: &str) -> String {
     let Ok(v) = serde_json::from_str::<Value>(text) else {
         return text.to_string();
     };
@@ -246,7 +259,11 @@ impl Square for HttpSquare {
     }
 
     fn is_live(&self) -> bool {
-        true
+        self.token().is_some()
+    }
+
+    fn awaiting_connection(&self) -> bool {
+        self.token().is_none()
     }
 
     async fn create_checkout(&self, push: &CheckoutPush) -> Result<CheckoutHandle, SquareError> {

@@ -14,6 +14,7 @@ import ScentManager from '../components/ScentManager.vue'
 import ShopManager from '../components/ShopManager.vue'
 import TeamManager from '../components/TeamManager.vue'
 import TerminalManager from '../components/TerminalManager.vue'
+import SquareConnection from '../components/SquareConnection.vue'
 import { BOTTLE_SIZES, INGREDIENT_TYPES } from '../lib/bottle.js'
 import { api, downloadBackup } from '../lib/api.js'
 import { currentUser } from '../lib/auth.js'
@@ -622,7 +623,13 @@ function formatTime(value) {
         <dt>Payments</dt>
         <dd>
           <span class="badge" :class="square.live ? 'ok-badge' : 'danger-badge'">
-            {{ square.live ? `Live — ${square.backend}` : 'Mock — no cards are charged' }}
+            {{
+              square.live
+                ? `Live — ${square.backend}`
+                : square.backend === 'mock'
+                  ? 'Mock — no cards are charged'
+                  : 'Not connected — no cards are charged'
+            }}
           </span>
         </dd>
         <dt>Webhook receiver</dt>
@@ -649,7 +656,7 @@ function formatTime(value) {
         </dd>
       </dl>
 
-      <p class="muted" v-if="square && !square.live">
+      <p class="muted" v-if="square && square.backend === 'mock'">
         Set <code>SQUARE_ACCESS_TOKEN</code> and <code>SQUARE_LOCATION_ID</code> in the
         server’s <code>.env</code> (plus <code>SQUARE_ENV=sandbox</code> while testing)
         and restart to take real payments. Add
@@ -673,6 +680,8 @@ function formatTime(value) {
         </button>
       </div>
     </div>
+
+    <SquareConnection :connection="square?.connection" @changed="refreshIntegration" />
 
     <TerminalManager :backend="square?.backend || ''" />
 

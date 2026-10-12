@@ -129,6 +129,10 @@ export const api = {
 
   // --- Square integration (admin) ---
   getSquareStatus: () => request('/square/status'),
+  // Connect Square (OAuth): returns { url } on Square to send the browser to.
+  startSquareConnect: () => request('/square/oauth/start', { method: 'POST' }),
+  renewSquareToken: () => request('/square/oauth/refresh', { method: 'POST' }),
+  disconnectSquare: () => request('/square/oauth/disconnect', { method: 'POST' }),
   listSquareEvents: () => request('/square/events'),
 
   // --- Chat notifications for customer-triggered events (admin) ---

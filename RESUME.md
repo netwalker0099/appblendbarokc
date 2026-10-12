@@ -1,5 +1,11 @@
 # Blend Bar — Resume Notes
 
+2026-10-12 — **Connect Square (OAuth) built and deployed; shop promoted to
+production** (Milestone 18 below). Sandbox webhooks, Terminal charge and refund
+all verified; both test carts refunded. The production OAuth credentials are in
+`.env` but dormant until `SQUARE_ENV=production`. **Next: the go-live steps in
+TODO.md.**
+
 2026-10-08 — **Square Terminal payments built and deployed; Reconciliation
 removed** (Milestone 17 below). Save intake builds the cart; "Charge on Terminal"
 sends it to a Square Terminal via the cloud Terminal API and the screen flips to
@@ -955,6 +961,49 @@ In order:
 
 The **"Shop Now" link** is fixed on the sandbox site (it goes to `/shop`); the
 production site picks it up when `site/` is promoted. See Milestone 16.
+
+## Milestone 18: Connect Square, sandbox sign-off, shop live (2026-10-12)
+
+**Sandbox sign-off.** Webhook subscription created and its signature key put in
+`.env`; the receiver is enabled (an unsigned POST gets 401). A $2.00 charge on the
+"Approves" test Terminal settled cart `5c125933…`, and Square's signed webhooks
+arrived and verified. The sandbox Square Dashboard showed **no refund button**,
+so refunds were issued through `POST /v2/refunds`: the `refund.*` webhook moved
+the cart paid → refunded within a second. The $1.00 test cart `2ee6ac46…` on
+"Ryan Taylor (example)" (owner confirmed: a test record) was refunded the same
+way. The app deliberately refuses to delete paid/refunded carts, so both remain
+as refunded records.
+
+**Shop promoted.** `rsync site/ site-prod/` + caddy rebuild: production now has
+the redesign and `/shop` (one listing, The Blend No. 1; $7 shipping). Every page
+200, no Squarespace links remain. Not yet looked at in a real browser.
+
+**Connect Square (OAuth)** replaces the all-permission personal access token.
+`api/src/square/oauth.rs` (flow, token file, renewal, status),
+`routes/square_oauth.rs` (start / callback / refresh / disconnect),
+`web/src/components/SquareConnection.vue` (Admin → Billing). Design points:
+- The client reads its bearer token from a shared `TokenCell` on every call, so
+  Connect Square and renewals take effect with no restart. With OAuth configured
+  and nothing connected the client has no token: calls fail "not connected",
+  `is_live()` is false (public checkout stays shut), and contact sync waits
+  (`Square::awaiting_connection`) instead of failing jobs permanently.
+- OAuth credentials count only when they match `SQUARE_ENV` (by application-id
+  prefix). When they do, `SQUARE_ACCESS_TOKEN` is ignored outright.
+- Token on the secrets volume (`square-oauth-<env>.json`, 0600, atomic write),
+  never in Postgres, so not in backups. Same reasoning as the Google key.
+- `state` is single-use, ten minutes, bound to the admin who pressed the button;
+  the callback also requires the admin session (cookie is SameSite=Lax, so it
+  rides along on Square's redirect). The callback path is in the audit log.
+- Renewal about a week after each issue (refresh when < 23 days remain), hourly
+  check; failures show on the Billing tab. Granted scopes are read back from
+  `/oauth2/token/status` and compared with `SCOPES` (missing and extra flagged).
+- Owner kept **contact sync**, so `CUSTOMERS_READ/WRITE` are requested.
+
+Verified: 159 unit tests (10 new) in `rust:1-slim-bookworm`; deployed; on
+sandbox the production credentials are correctly reported as the other
+environment and the sandbox token keeps working; new routes 401 without a
+session. **Not yet exercised against Square** — that happens at go-live, since
+the credentials are production.
 
 ## Milestone 17: Square Terminal payments (2026-10-08)
 

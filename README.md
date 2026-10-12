@@ -325,9 +325,9 @@ Routes: `POST/GET /api/carts/:id/terminal`, `POST /api/carts/:id/terminal/cancel
 
 ### Square permissions
 
-The token currently in `.env` is a **personal access token**, which carries every
-permission on the account. Moving to **OAuth** lets the app hold only what it
-uses. The minimum set for what this app does today:
+A **personal access token** (`SQUARE_ACCESS_TOKEN`) carries every permission on
+the account. **Connect Square** (OAuth) lets the app hold only what it uses — the
+set below, which is exactly what `square::oauth::SCOPES` asks for:
 
 | Permission | Used for |
 |---|---|
@@ -341,6 +341,36 @@ uses. The minimum set for what this app does today:
 Not needed: `ITEMS_READ` / `INVENTORY_READ` (prices come from this app's own
 catalogue), `MERCHANT_PROFILE_READ`. Never to be granted: `BANK_ACCOUNTS_READ`,
 `BANK_ACCOUNTS_WRITE`, `PAYOUTS_READ`, `CASH_DRAWER_READ`, or anything else.
+
+### Connect Square (OAuth)
+
+1. In the Square Developer Dashboard, on the application's **OAuth** page for the
+   environment in use, set the **Redirect URL** to
+   `https://app.theblendbarokc.com/api/square/oauth/callback` (exactly).
+2. Put that environment's **Application ID** and **Application Secret** in `.env`
+   as `SQUARE_OAUTH_APPLICATION_ID` / `SQUARE_OAUTH_APPLICATION_SECRET`, with
+   `SQUARE_ENV` and `SQUARE_LOCATION_ID` for the same environment, then
+   `docker compose up -d api`. Credentials for the *other* environment are
+   ignored (production ids start `sq0idp-`, sandbox `sandbox-sq0idb-`).
+3. Admin → Billing → **Connect Square**. Sign in to Square, check the permission
+   list, Allow. The Billing tab shows the merchant and the permissions Square
+   actually granted, and flags any missing or extra.
+
+Once OAuth is configured for the environment, **`SQUARE_ACCESS_TOKEN` is
+ignored** — remove it. Until Connect Square is done the client has no token:
+payments fail with "not connected", the public checkout guard stays shut, and
+contact sync waits rather than burning its retries.
+
+The token is a 0600 file on the secrets volume
+(`/var/lib/blendbar/secrets/square-oauth-<env>.json`), never a database row, so
+it is not in backups. It lasts 30 days and is renewed about weekly by a worker
+(and by **Renew now**); a failed renewal shows on the Billing tab with three
+weeks to spare. **Disconnect** revokes it at Square. Connecting is recorded in
+the audit log (path only — the authorization code is not stored).
+
+Routes (admin): `POST /api/square/oauth/start` → `{url}`, `GET
+/api/square/oauth/callback`, `POST /api/square/oauth/refresh`, `POST
+/api/square/oauth/disconnect`. Status in `GET /api/square/status` → `connection`.
 
 The reconciliation report was removed on 2026-10-08 at the owner's request; the
 `reconciliation_runs` table is kept as read-only history.

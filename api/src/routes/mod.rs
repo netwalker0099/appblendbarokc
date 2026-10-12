@@ -20,6 +20,7 @@ pub mod scents;
 pub mod session;
 pub mod settings;
 pub mod shop;
+pub mod square_oauth;
 pub mod square_status;
 pub mod square_webhooks;
 pub mod sync;
@@ -109,6 +110,12 @@ pub fn build_router(state: AppState) -> Router {
                 .delete(terminal::remove),
         )
         .route("/api/square/status", get(square_status::status))
+        // Connect Square (OAuth). The callback is a GET because Square sends
+        // the browser to it; it is still behind the employee session.
+        .route("/api/square/oauth/start", post(square_oauth::start))
+        .route("/api/square/oauth/callback", get(square_oauth::callback))
+        .route("/api/square/oauth/refresh", post(square_oauth::refresh))
+        .route("/api/square/oauth/disconnect", post(square_oauth::disconnect))
         .route("/api/square/events", get(square_webhooks::recent))
         // Chat notifications for customer-triggered events (admin-only).
         .route(

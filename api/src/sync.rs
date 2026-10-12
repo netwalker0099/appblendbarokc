@@ -117,6 +117,11 @@ pub async fn run_worker(state: AppState) {
 }
 
 async fn drain_once(state: &AppState) -> Result<(), sqlx::Error> {
+    // Every job would fail for want of a token and burn its retries; leave them
+    // queued until Connect Square is done.
+    if state.square.awaiting_connection() {
+        return Ok(());
+    }
     let jobs = sqlx::query_as::<_, SyncJob>(
         r#"
         select * from sync_outbox

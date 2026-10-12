@@ -17,11 +17,12 @@
 mod http;
 mod mock;
 pub mod money;
+pub mod oauth;
 
 pub use http::HttpSquare;
 pub use mock::MockSquare;
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -237,6 +238,13 @@ pub trait Square: Send + Sync {
     /// make "you are not actually charging anyone" impossible to miss.
     fn is_live(&self) -> bool;
 
+    /// True for the real client while it has no token yet (OAuth configured,
+    /// Connect Square not pressed). Work that would fail for that reason alone,
+    /// like contact sync, waits instead of using up its retries.
+    fn awaiting_connection(&self) -> bool {
+        false
+    }
+
     /// Push a cart and get back a hosted checkout URL.
     async fn create_checkout(&self, push: &CheckoutPush) -> Result<CheckoutHandle, SquareError>;
 
@@ -298,63 +306,114 @@ pub trait Square: Send + Sync {
     async fn upsert_customer(&self, customer: &CustomerPush) -> Result<String, SquareError>;
 }
 
+/// Where the live client reads its bearer token. Shared with
+/// [`oauth::Connection`], which fills it on Connect Square and swaps it on each
+/// renewal; `None` means not connected.
+pub type TokenCell = Arc<RwLock<Option<Arc<str>>>>;
+
 /// Configuration read once at startup.
 pub struct SquareConfig {
-    pub access_token: String,
+    pub token: TokenCell,
     pub location_id: String,
     pub env: SquareEnv,
     pub redirect_url: Option<String>,
 }
 
-/// Build the live client when a token *and* a location id are both configured,
+/// The Square client and its connection, built together because they share
+/// the token.
+pub struct SquareSetup {
+    pub client: Arc<dyn Square>,
+    pub connection: Arc<oauth::Connection>,
+}
+
+/// Build the live client when there is a location id and a way to get a token,
 /// otherwise the mock.
 ///
-/// Both are required on purpose: Square rejects an order with no `location_id`,
+/// A location id is required on purpose: Square rejects an order without one,
 /// so a token-only config would fail at the worst possible moment (mid-checkout,
 /// in front of a customer) rather than at boot. Failing to the mock keeps the
 /// stand usable and makes the gap obvious in the admin panel.
-pub fn from_env() -> Arc<dyn Square> {
-    let token = std::env::var("SQUARE_ACCESS_TOKEN")
-        .ok()
-        .filter(|s| !s.trim().is_empty());
-    let location = std::env::var("SQUARE_LOCATION_ID")
-        .ok()
-        .filter(|s| !s.trim().is_empty());
+///
+/// The token comes from OAuth when `SQUARE_OAUTH_APPLICATION_ID`/`_SECRET` for
+/// this environment are set — `SQUARE_ACCESS_TOKEN` is then ignored — and from
+/// `SQUARE_ACCESS_TOKEN` otherwise. Under OAuth the client starts with no token
+/// until [`oauth::Connection::load_stored`] or Connect Square supplies one.
+pub fn from_env() -> SquareSetup {
+    let var = |key: &str| {
+        std::env::var(key)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    let personal_token = var("SQUARE_ACCESS_TOKEN");
+    let location = var("SQUARE_LOCATION_ID");
 
     let env = match std::env::var("SQUARE_ENV").as_deref() {
         Ok("production") | Ok("prod") => SquareEnv::Production,
         _ => SquareEnv::Sandbox,
     };
+    let redirect_url = var("SQUARE_REDIRECT_URL");
+    let setup = oauth::OAuthSetup::from_env(env);
 
-    let redirect_url = std::env::var("SQUARE_REDIRECT_URL")
-        .ok()
-        .filter(|s| !s.trim().is_empty());
+    if let oauth::OAuthSetup::WrongEnvironment { app_env } = &setup {
+        tracing::warn!(
+            app_env = app_env.label(),
+            server_env = env.label(),
+            "square: the OAuth application credentials are for the other environment \
+             — Connect Square is unavailable until SQUARE_ENV matches them"
+        );
+    }
 
-    match (token, location) {
-        (Some(access_token), Some(location_id)) => {
-            tracing::info!(
-                env = env.label(),
-                location_id = %location_id,
-                "square: live HTTP client"
-            );
-            if env == SquareEnv::Production {
-                tracing::warn!("square: PRODUCTION environment — real cards will be charged");
-            }
-            Arc::new(HttpSquare::new(SquareConfig {
-                access_token,
-                location_id,
-                env,
-                redirect_url,
-            }))
-        }
-        (token, location) => {
+    let oauth_ready = setup.ready().is_some();
+    let initial_token = if oauth_ready {
+        if personal_token.is_some() {
             tracing::warn!(
-                have_token = token.is_some(),
-                have_location = location.is_some(),
-                "square: SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID must both be set \
-                 — falling back to the in-process mock, no real payments will be taken"
+                "square: OAuth is configured, so SQUARE_ACCESS_TOKEN is ignored — remove \
+                 it from .env"
             );
-            Arc::new(MockSquare::default())
         }
+        None
+    } else {
+        personal_token.clone()
+    };
+
+    let Some(location_id) = location.filter(|_| oauth_ready || initial_token.is_some()) else {
+        tracing::warn!(
+            have_token = personal_token.is_some(),
+            have_oauth = oauth_ready,
+            have_location = var("SQUARE_LOCATION_ID").is_some(),
+            "square: SQUARE_LOCATION_ID plus a token (SQUARE_ACCESS_TOKEN, or OAuth) are \
+             required — falling back to the in-process mock, no real payments will be taken"
+        );
+        return SquareSetup {
+            client: Arc::new(MockSquare::default()),
+            connection: Arc::new(oauth::Connection::new(setup, None, false)),
+        };
+    };
+
+    tracing::info!(
+        env = env.label(),
+        location_id = %location_id,
+        auth = if oauth_ready { "oauth" } else { "personal access token" },
+        "square: live HTTP client"
+    );
+    if env == SquareEnv::Production {
+        tracing::warn!("square: PRODUCTION environment — real cards will be charged");
+    }
+
+    let using_personal_token = initial_token.is_some();
+    let token: TokenCell = Arc::new(RwLock::new(initial_token.map(Arc::from)));
+    SquareSetup {
+        client: Arc::new(HttpSquare::new(SquareConfig {
+            token: token.clone(),
+            location_id,
+            env,
+            redirect_url,
+        })),
+        connection: Arc::new(oauth::Connection::new(
+            setup,
+            Some(token),
+            using_personal_token,
+        )),
     }
 }

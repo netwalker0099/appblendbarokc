@@ -30,6 +30,9 @@ use crate::square::Square;
 pub struct AppState {
     pub db: PgPool,
     pub square: Arc<dyn Square>,
+    /// Connect Square (OAuth) and the token the client sends; see
+    /// `square::oauth`.
+    pub square_connection: Arc<square::oauth::Connection>,
     /// Square's webhook signature key. `None` disables the receiver (it returns
     /// 503 rather than trust an unverified request that can mark carts paid).
     pub square_webhook_key: Option<Arc<str>>,
@@ -183,9 +186,13 @@ async fn main() {
         ),
     }
 
+    let square_setup = square::from_env();
+    square_setup.connection.load_stored();
+
     let state = AppState {
         db,
-        square: square::from_env(),
+        square: square_setup.client,
+        square_connection: square_setup.connection,
         square_webhook_key,
         square_webhook_url,
         // Ten checkout attempts per IP per five minutes: far more than a real
@@ -210,6 +217,9 @@ async fn main() {
     // life of the process.
     tokio::spawn(sync::run_worker(state.clone()));
     tokio::spawn(backup::run_worker(state.clone()));
+    tokio::spawn(square::oauth::run_refresh_worker(
+        state.square_connection.clone(),
+    ));
 
     let app = routes::build_router(state);
 

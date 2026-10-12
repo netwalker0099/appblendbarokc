@@ -59,6 +59,7 @@ pub async fn status(
     Ok(Json(json!({
         "backend": state.square.name(),
         "live": state.square.is_live(),
+        "connection": state.square_connection.status(),
         "webhook_receiver_enabled": state.square_webhook_key.is_some()
             && state.square_webhook_url.is_some(),
         "cart_counts": counts,

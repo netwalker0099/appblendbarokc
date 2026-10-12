@@ -32,6 +32,12 @@ services:
       SQUARE_REDIRECT_URL: ${SQUARE_REDIRECT_URL:-}
       SQUARE_WEBHOOK_SIGNATURE_KEY: ${SQUARE_WEBHOOK_SIGNATURE_KEY:-}
       SQUARE_WEBHOOK_URL: ${SQUARE_WEBHOOK_URL:-}
+      # Connect Square (OAuth). When set for SQUARE_ENV's environment, the token
+      # comes from Admin → Billing → Connect Square and SQUARE_ACCESS_TOKEN is
+      # ignored. The token is kept on the email_secrets volume below.
+      SQUARE_OAUTH_APPLICATION_ID: ${SQUARE_OAUTH_APPLICATION_ID:-}
+      SQUARE_OAUTH_APPLICATION_SECRET: ${SQUARE_OAUTH_APPLICATION_SECRET:-}
+      SQUARE_OAUTH_REDIRECT_URL: ${SQUARE_OAUTH_REDIRECT_URL:-}
       # TEMPORARY dev bypass for the customer portal (remove when email is wired).
       PORTAL_BYPASS_EMAIL: ${PORTAL_BYPASS_EMAIL:-}
       # Email via the Google Workspace SMTP relay. No SMTP_HOST => mock mailer.
