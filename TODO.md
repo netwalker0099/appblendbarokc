@@ -39,9 +39,10 @@ Milestone 17 (Square Terminal, 2026-10-08).
   Done 2026-10-12: $2.00 Terminal charge (cart `5c125933…`) paid, then refunded
   via the Refunds API (the sandbox dashboard showed no refund button); webhook
   moved the cart paid → refunded within a second.
-- [ ] **Decide on the $1.00 test cart** `2ee6ac46…` on "Ryan Taylor (example)" —
+- [x] **Decide on the $1.00 test cart** `2ee6ac46…` on "Ryan Taylor (example)" —
   confirm that customer is a test record; cancel or keep as a marked test.
-  Owner confirmed 2026-10-12: it is a test record. Still to choose: cancel, or keep.
+  Owner confirmed 2026-10-12: it is a test record. Refunded in Sandbox via the
+  Refunds API the same day; the webhook moved the cart paid → refunded.
 - [x] **Commit.** ~32 files of already-deployed work plus the 2026-10-01
   public-checkout guard (`api/src/routes/public.rs`) and doc updates are
   uncommitted. Commit the guard + docs on their own.
