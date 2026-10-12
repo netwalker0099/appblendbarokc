@@ -3,7 +3,7 @@
 Open items are `- [ ]`; tick one off with `- [x]` when done. Every open item is
 shown at the start of each Claude Code session until it is ticked.
 
-- [ ] **Promote the shop to production.** Built 2026-10-05 (RESUME.md →
+- [x] **Promote the shop to production.** Built 2026-10-05 (RESUME.md →
   Milestone 16) and live on the sandbox site at `/shop`, where the "Shop Now"
   button now points. The production site still links to the old Squarespace
   store. First, add the real products in Admin → Shop and look over
@@ -12,6 +12,9 @@ shown at the start of each Claude Code session until it is ticked.
   `docker compose up --build -d caddy`. This also brings across the redesign
   `site-prod/` has been missing — see README "Promoting the sandbox site".
   Shop checkout stays off until the Square go-live below.
+  Done 2026-10-12: promoted with one listing (The Blend No. 1, $7 shipping).
+  Every page returns 200, with no Squarespace links left. Still to do: look
+  it over in a real browser on desktop and phone.
 
 **Square go-live** — resume here. Context: RESUME.md → Milestone 15 (Sandbox) and
 Milestone 17 (Square Terminal, 2026-10-08).
@@ -25,6 +28,10 @@ Milestone 17 (Square Terminal, 2026-10-08).
   **production application id + secret** (entered into `.env` by the owner, never
   pasted into chat), and a decision on whether contact sync to Square Customers
   stays (it alone needs `CUSTOMERS_READ/WRITE`).
+  2026-10-12: `.env` has `SQUARE_OAUTH_APPLICATION_ID` (ok) and
+  `SQUARE_OAUTH_APPLICATION_SECRET`, but the secret holds an `EAAA…` access
+  token, not the `sq0csp-…` secret; the owner needs to replace it. The OAuth
+  "Connect Square" flow is not built yet.
 
 - [x] **`chmod 600 /opt/app/.env`.** It is `644`; it now holds the Square token.
 - [x] **Square sandbox webhooks.** Developer dashboard → Sandbox → Webhooks →

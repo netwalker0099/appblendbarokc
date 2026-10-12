@@ -1,5 +1,5 @@
 /* Customer portal app (vanilla JS; served under a strict CSP so no inline JS).
-   Talks to the same-origin API proxied by the site vhost. */
+   Talks to the same-origin API proxied by the sandbox vhost. */
 (function () {
   const view = document.getElementById('view')
   const esc = (s) =>

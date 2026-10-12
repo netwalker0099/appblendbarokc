@@ -10,19 +10,22 @@
     />
     <link rel="icon" type="image/webp" href="assets/img1.webp" />
     <link rel="stylesheet" href="styles.css" />
+    <!-- Scroll reveal + the footer year. Deferred, and the page is complete
+         without it: see the note on .reveal in styles.css. -->
+    <script src="home.js" defer></script>
   </head>
   <body>
     <header class="site-header">
       <div class="wrap">
         <a class="brand" href="index.html" aria-label="The Blend Bar home">
-          <img src="assets/img1.webp" alt="The Blend Bar monogram" />
+          <img src="assets/img1.webp" alt="" width="30" height="30" />
           <span class="name">The Blend Bar</span>
         </a>
         <nav class="nav" aria-label="Primary">
           <div class="links">
             <a href="#about">About</a>
             <a href="#experience">Experience</a>
-            <a href="#shop">Shop</a>
+            <a href="/shop">Shop</a>
             <a href="#events">Events</a>
             <a href="#footer">Contact</a>
           </div>
@@ -38,17 +41,17 @@
       <section class="hero" id="top">
         <div class="wrap">
           <div class="hero-copy">
-            <h1>Craft a scent that is distinctly yours.</h1>
-            <p>
-              Discover the notes you love and blend a fragrance that is yours
-              alone.
+            <p class="eyebrow">The Blend Bar · Oklahoma City</p>
+            <h1>Craft a scent that is <span class="accent">distinctly yours</span>.</h1>
+            <p class="lede">
+              Discover the notes you love and blend a fragrance that is yours alone.
             </p>
             <div class="cta-row">
-              <a class="btn solid" href="#experience">Begin the Experience</a>
-              <a class="btn ghost" href="#shop">Shop Blend N&deg;1</a>
+              <a class="btn solid" href="#experience">Begin the experience</a>
+              <a class="link-more" href="#shop">Shop Blend N&deg;1</a>
             </div>
           </div>
-          <figure class="hero-figure">
+          <figure class="hero-figure reveal">
             <img
               src="assets/img2.webp"
               alt="The Blend Bar signature atomizer, gold on stone"
@@ -59,14 +62,13 @@
         </div>
       </section>
 
-      <section id="about">
+      <section class="band" id="about">
         <div class="wrap">
-          <div class="section-head">
-            <p class="star">&#10022;</p>
-            <p class="eyebrow">About Us</p>
-            <h2>The Blend Bar Experience</h2>
+          <div class="section-head reveal">
+            <p class="eyebrow">About us</p>
+            <h2>Fragrance as personal as the person wearing it.</h2>
           </div>
-          <div class="about-copy">
+          <div class="about-copy reveal">
             <p>
               At The Blend Bar, we believe fragrance should be as unique as the
               person wearing it. Our luxury mobile perfumery brings a personalized
@@ -82,41 +84,38 @@
               beautiful keepsake, and leave with a one-of-a-kind scent they created
               themselves.
             </p>
-            <p class="about-tagline">Luxury. Fragrance. Personalized.</p>
           </div>
         </div>
       </section>
 
-      <section class="band" id="experience">
+      <section id="experience">
         <div class="wrap">
-          <div class="section-head">
-            <p class="star">&#10022;</p>
-            <p class="eyebrow">The Blend Bar Experience</p>
-            <h2>Three steps to your signature scent</h2>
+          <div class="section-head reveal">
+            <p class="eyebrow">The experience</p>
+            <h2>Three steps to your signature scent.</h2>
             <p>
               A guided session at the bar. No fragrance knowledge needed. Your
               formula is yours to keep and reorder.
             </p>
           </div>
-          <div class="cards">
-            <div class="card">
-              <div class="num">I</div>
+          <div class="cards stagger reveal">
+            <div class="card tile">
+              <p class="num">1</p>
               <h3>Discover</h3>
               <p>
-                Explore our library of fragrances and find what you're drawn to,
-                with an expert blender beside you.
+                Explore our library of fragrances and find what you&rsquo;re drawn
+                to, with an expert blender beside you.
               </p>
             </div>
-            <div class="card">
-              <div class="num">II</div>
+            <div class="card tile">
+              <p class="num">2</p>
               <h3>Blend</h3>
               <p>
-                Balance base, heart and top notes measured exactly to your
-                liking.
+                Balance base, heart and top notes measured exactly to your liking.
               </p>
             </div>
-            <div class="card">
-              <div class="num">III</div>
+            <div class="card tile">
+              <p class="num">3</p>
               <h3>Bottle</h3>
               <p>
                 Take it home in your chosen size. We save the formula so you can
@@ -127,45 +126,61 @@
         </div>
       </section>
 
-      <section id="shop">
+      <!-- The one dark, near-empty section. It carries the brand line that used
+           to sit at the bottom of the About copy, where it read as an
+           afterthought. -->
+      <section class="statement">
+        <div class="wrap">
+          <h2 class="reveal">Luxury. Fragrance. <em>Personalized.</em></h2>
+          <p class="reveal">
+            A mobile perfumery that comes to you, and a formula that stays yours.
+          </p>
+        </div>
+      </section>
+
+      <section class="band" id="shop">
         <div class="wrap product">
-          <figure class="product-figure">
-            <img src="assets/img3.jpeg" alt="The Blend N&deg;1 emblem" width="1254" height="1254" />
+          <figure class="product-figure reveal">
+            <img
+              src="assets/img3.jpeg"
+              alt="The Blend N&deg;1 emblem"
+              width="1254"
+              height="1254"
+            />
           </figure>
-          <div class="product-copy">
-            <p class="eyebrow">Our Signature</p>
+          <div class="product-copy reveal">
+            <p class="eyebrow">Our signature</p>
             <h2>The Blend N&deg;1</h2>
             <p>
               The house blend that started it all. Warm cashmere, refined and
               lasting.
             </p>
             <div class="cta-row">
-              <a class="btn solid" href="https://theblendbarokc.com" rel="noopener">Shop Now</a>
-              <a class="btn ghost" href="#experience">Book the Experience</a>
+              <a class="btn solid" href="/shop">Shop now</a>
+              <a class="link-more" href="#experience">Book the experience</a>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="band" id="events">
+      <section id="events">
         <div class="wrap">
-          <div class="section-head">
-            <p class="star">&#10022;</p>
-            <p class="eyebrow">Private &amp; Corporate</p>
-            <h2>Book an Event</h2>
+          <div class="section-head reveal">
+            <p class="eyebrow">Private &amp; corporate</p>
+            <h2>Every occasion is a special occasion.</h2>
             <p>
               From corporate events to intimate gatherings and wedding
-              celebrations, every occasion is a special occasion and we&rsquo;ll
-              bring the art of custom fragrance blending directly to you.
+              celebrations, we&rsquo;ll bring the art of custom fragrance blending
+              directly to you.
             </p>
-          </div>
-          <div style="text-align: center">
-            <a class="btn solid" href="/book">Book an Event</a>
+            <div class="cta-row" style="justify-content: center; margin-top: 2rem">
+              <a class="btn solid" href="/book">Book an event</a>
+            </div>
           </div>
 
-          <div class="terms">
+          <div class="terms reveal">
             <div class="terms-col">
-              <h3>Booking Terms</h3>
+              <h3>Booking terms</h3>
               <ul>
                 <li>
                   A deposit is required to reserve and secure your event date.
@@ -178,14 +193,14 @@
                   availability, as determined by The Blend Bar.
                 </li>
                 <li>
-                  If necessary, multi-day events are required to cover the cost of one
-                  (1) hotel room for product and display storage.
+                  If necessary, multi-day events are required to cover the cost of
+                  one (1) hotel room for product and display storage.
                 </li>
                 <li>
                   We understand that plans can change! If you need to cancel or
-                  reschedule your event, we ask that you provide at least 14 days&rsquo;
-                  written notice. Your deposit can be applied toward a future event
-                  scheduled within 6 months of your original event date.
+                  reschedule your event, we ask that you provide at least 14
+                  days&rsquo; written notice. Your deposit can be applied toward a
+                  future event scheduled within 6 months of your original event date.
                 </li>
               </ul>
             </div>
@@ -193,25 +208,21 @@
         </div>
       </section>
 
-      <section id="access" class="access">
+      <section id="access" class="access band">
         <div class="wrap">
-          <div class="section-head">
+          <div class="section-head reveal">
             <p class="eyebrow">Portals</p>
-            <h2>Sign in</h2>
+            <h2>Sign in.</h2>
           </div>
-          <div class="cards">
-            <div class="card">
+          <div class="cards stagger reveal">
+            <div class="card tile">
               <h3>Customer Portal</h3>
-              <p>
-                We'll email you a link to view your saved blends and reorder.
-              </p>
+              <p>We&rsquo;ll email you a link to view your saved blends and reorder.</p>
               <a class="btn solid" href="/portal">Customer sign in</a>
             </div>
-            <div class="card">
+            <div class="card tile">
               <h3>Team Member</h3>
-              <p>
-                Staff sign-in for intake and blending at the bar.
-              </p>
+              <p>Staff sign-in for intake and blending at the bar.</p>
               <a class="btn ghost" href="https://app.theblendbarokc.com/">Admin Login</a>
             </div>
           </div>
@@ -223,14 +234,12 @@
       <div class="wrap">
         <div>
           <div class="name">The Blend Bar</div>
-          <p style="margin: 0; color: #a99a82; max-width: 22rem">
-            Luxury. Fragrance. Personalized.
-          </p>
+          <p class="tagline">Luxury. Fragrance. Personalized.</p>
         </div>
         <div>
           <h4>Explore</h4>
           <a href="#experience">The Experience</a>
-          <a href="#shop">Shop Blend N&deg;1</a>
+          <a href="/shop">Shop</a>
           <a href="#events">Book an Event</a>
         </div>
         <div>
