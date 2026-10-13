@@ -67,8 +67,12 @@
   --shadow: var(--shadow-soft);
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --wrap: 1120px;
+  /* The content column: 1120px on a laptop, widening with the screen past that
+     so a large monitor isn't a narrow strip between two empty margins. */
+  --wrap: max(70rem, min(76vw, 90rem));
   --wrap-narrow: 46rem;
+  /* The sticky header's height, for anything sized to "the screen below it". */
+  --header-h: 54px;
 }
 
 * {
@@ -76,6 +80,11 @@
 }
 
 html {
+  /* Fluid scale for big screens. 16px up to 1440px wide, then growing slowly to
+     19px by about 2400px. Almost every size in this file is in rem, so type,
+     spacing, buttons and the column all grow together, and a 27-inch monitor
+     sees the same proportions as a laptop rather than the same pixels. */
+  font-size: clamp(100%, calc(100% + (100vw - 1440px) * 0.003), 118.75%);
   scroll-behavior: smooth;
   /* A warm light palette throughout; stops the browser rendering form controls
      and scrollbars in dark chrome for visitors whose OS prefers dark. */
@@ -87,13 +96,27 @@ body {
   background: var(--paper);
   color: var(--text);
   font-family: var(--sans);
-  /* 17px/1.47 is Apple's own body setting, and it is genuinely comfortable. */
-  font-size: 17px;
+  /* 17px/1.47 is Apple's own body setting, and it is genuinely comfortable.
+     In rem so it follows the fluid scale on html. */
+  font-size: 1.0625rem;
   line-height: 1.47;
   letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  /* Short pages (an empty bag, a sign-in card) still end at the bottom of the
+     screen: the footer is pushed down instead of leaving a white strip under it. */
+  min-height: 100vh;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+body > main {
+  flex: 1 0 auto;
+  /* In a flex column, a main with auto side margins (.portal-wrap) would
+     otherwise shrink to its content instead of taking its max-width. */
+  width: 100%;
 }
 
 img {
@@ -325,7 +348,7 @@ summary:focus-visible {
   display: flex;
   align-items: center;
   gap: 1.5rem;
-  min-height: 54px;
+  min-height: var(--header-h);
 }
 
 .brand {
@@ -458,13 +481,68 @@ section {
 
 .hero-figure {
   margin: clamp(2.5rem, 6vw, 4.5rem) auto 0;
-  max-width: 560px;
+  /* Never taller than the screen: the photo is 2:3, so its width is capped at
+     two thirds of the visible height (less room for the header and a margin).
+     Without this it was a fixed 560×841px and ran off the bottom of every
+     laptop and phone. vh first for browsers that lack svh. */
+  width: min(100%, 35rem, calc((100vh - var(--header-h) - 3rem) * 2 / 3));
+  width: min(100%, 35rem, calc((100svh - var(--header-h) - 3rem) * 2 / 3));
 }
 
 .hero-figure img {
   width: 100%;
   border-radius: var(--r-media);
   box-shadow: var(--shadow-lift);
+}
+
+/* On a landscape screen wide enough for two columns, the hero fills exactly
+   one screen: copy on the left, the photo on the right at the full visible
+   height. Stacked, a laptop only ever showed the headline and the top of the
+   photo, and had to scroll to see what the page was about. Portrait tablets
+   and phones keep the stacked layout, where it fits. */
+@media (min-width: 1024px) and (orientation: landscape) {
+  .hero {
+    --hero-pad: clamp(1.5rem, 5vh, 3.5rem);
+    min-height: calc(100vh - var(--header-h));
+    min-height: calc(100svh - var(--header-h));
+    display: flex;
+    align-items: center;
+    padding: var(--hero-pad) 0;
+    text-align: left;
+  }
+  .hero .wrap {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: clamp(2.5rem, 5vw, 6rem);
+    align-items: center;
+  }
+  .hero-copy {
+    margin: 0;
+    max-width: 40rem;
+  }
+  .hero h1 {
+    font-size: clamp(2.75rem, 4.8vw, 5.5rem);
+  }
+  .hero .lede {
+    margin-left: 0;
+  }
+  .hero .cta-row {
+    justify-content: flex-start;
+  }
+  .hero-figure {
+    margin: 0;
+    width: auto;
+  }
+  /* Height drives the size here; the width follows from the 2:3 photo. */
+  .hero-figure img {
+    width: auto;
+    height: calc(100vh - var(--header-h) - 2 * var(--hero-pad));
+    height: calc(100svh - var(--header-h) - 2 * var(--hero-pad));
+    max-height: 60rem;
+    max-width: 100%;
+    object-fit: cover;
+  }
 }
 
 /* --- About --- */
@@ -728,6 +806,30 @@ section:not(.band) .tile {
   margin-top: 2.5rem;
   padding-top: 1.25rem;
   color: var(--muted);
+}
+
+/* The legal line is also a .wrap, so the footer's three-column grid above was
+   splitting "© 2026 The Blend Bar" into three cells across the page. */
+.site-footer .wrap.legal {
+  display: block;
+}
+
+/* Pages whose footer is only the legal line (shop, book): no rule above it and
+   no gap, or it sits under an empty band. */
+.site-footer > .legal:first-child {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.site-footer:has(> .legal:first-child) {
+  padding-top: 2rem;
+}
+
+/* Inline in the legal line, not stacked like the footer's link columns. */
+.site-footer .legal a {
+  display: inline;
+  margin: 0;
 }
 
 /* ==========================================================================
@@ -1336,7 +1438,7 @@ section:not(.band) .tile {
    running total stays in view while browsing a long shop. */
 .shop-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 21.25rem;
   gap: clamp(1.5rem, 3vw, 2.5rem);
   align-items: start;
 }
@@ -1345,7 +1447,7 @@ section:not(.band) .tile {
 .shop-grid {
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr));
   gap: 1.25rem;
 }
 
