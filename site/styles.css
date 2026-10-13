@@ -38,9 +38,15 @@
   --gold: #ac854a;
   --gold-deep: #8c6a36;
   --gold-soft: #c9a86c;
+  /* Filled buttons. White on --gold is only 3.4:1, under the 4.5:1 that
+     button-sized text needs, so fills use --gold-deep (5:1) and press darker. */
+  --gold-press: #735628;
   --ink: #211c15;
   --text: #4c4235;
-  --muted: #897a63;
+  /* Secondary text. #897a63 until 2026-10-13, which read at only 3.9:1 on
+     cream and 4.2:1 on white; this is the same warm grey-brown 15% darker,
+     and passes WCAG AA (4.5:1) on paper, cream and sand. */
+  --muted: #746854;
   --line: #e2d7c1;
 
   /* SF Pro where it exists, a graceful fall through Helvetica elsewhere. */
@@ -70,7 +76,9 @@
   /* The content column: 1120px on a laptop, widening with the screen past that
      so a large monitor isn't a narrow strip between two empty margins. */
   --wrap: max(70rem, min(76vw, 90rem));
-  --wrap-narrow: 46rem;
+  /* Long-form text column. 40rem keeps paragraphs near 70 characters a line;
+     at 46rem the About copy and booking terms ran to 86-90. */
+  --wrap-narrow: 40rem;
   /* The sticky header's height, for anything sized to "the screen below it". */
   --header-h: 54px;
 }
@@ -165,6 +173,17 @@ h3 {
 ::selection {
   background: var(--gold-soft);
   color: var(--ink);
+}
+
+/* The browser-drawn parts carry the palette too: the text caret, scrollbars
+   (where the browser lets them be coloured), and link underlines. */
+html {
+  caret-color: var(--gold-deep);
+  scrollbar-color: var(--sand-deep) transparent;
+}
+
+a {
+  text-underline-offset: 0.18em;
 }
 
 /* One focus treatment for every interactive thing on the site. Gold, offset so
@@ -298,12 +317,12 @@ summary:focus-visible {
 }
 
 .btn.solid {
-  background: var(--gold);
+  background: var(--gold-deep);
   color: #fff;
 }
 
 .btn.solid:hover {
-  background: var(--gold-deep);
+  background: var(--gold-press);
   color: #fff;
 }
 
@@ -314,8 +333,8 @@ summary:focus-visible {
 }
 
 .btn.ghost:hover {
-  background: var(--gold);
-  border-color: var(--gold);
+  background: var(--gold-deep);
+  border-color: var(--gold-deep);
   color: #fff;
 }
 
@@ -1521,7 +1540,7 @@ section:not(.band) .tile {
   flex: 1;
 }
 
-.shop-body h3 {
+.shop-body h2 {
   font-size: 1.2rem;
   letter-spacing: -0.02em;
 }
@@ -1562,7 +1581,9 @@ section:not(.band) .tile {
 }
 
 .link-back::before {
-  content: "‹ ";
+  /* A margin, not a trailing space: inline-flex (touch screens) drops it. */
+  content: "‹";
+  margin-right: 0.3em;
 }
 
 .shop-detail-grid {
@@ -1770,5 +1791,40 @@ section:not(.band) .tile {
 @media (max-width: 520px) {
   .shop-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Touch targets. On a touch screen every link and button is at least 44px
+   tall (Apple's and WCAG's minimum); with a mouse the compact sizes above
+   stay. Last in the file so the shop's own sizes above don't override it.
+   Measured on a 390px phone before this: nav links were 19px, the header
+   buttons 35px, footer links 20px and the bag's +/- 30px. */
+@media (pointer: coarse) {
+  .brand,
+  .nav .links a,
+  .link-more,
+  .link-back,
+  .site-footer a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .site-footer a {
+    display: flex;
+    margin-bottom: 0;
+  }
+  .site-footer .legal a {
+    display: inline-flex;
+  }
+  .btn,
+  .nav .actions .btn {
+    min-height: 44px;
+  }
+  .bag-qty button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+  .link-back {
+    margin-bottom: 0.6rem;
   }
 }

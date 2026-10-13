@@ -127,7 +127,7 @@
     return `<a class="shop-card" href="${itemUrl(p)}">
       <div class="shop-media">${imageFor(p, true)}</div>
       <div class="shop-body">
-        <h3>${esc(p.name)}</h3>
+        <h2>${esc(p.name)}</h2>
         <p class="shop-price">${priceFrom(p)}</p>
         ${p.sold_out ? '<p class="shop-flag">Sold out</p>' : ''}
       </div>

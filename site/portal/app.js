@@ -36,6 +36,7 @@
         <h1>Reorder your signature</h1>
         <p>Enter your email and we'll send you a sign-in link.</p>
         <form id="loginForm" novalidate>
+          <label class="visually-hidden" for="email">Email address</label>
           <input id="email" class="portal-input" type="email" placeholder="you@example.com" autocomplete="email" required />
           <button class="btn solid" type="submit" id="loginBtn">Send sign-in link</button>
         </form>

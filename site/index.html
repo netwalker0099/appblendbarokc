@@ -53,7 +53,10 @@
           </div>
           <figure class="hero-figure reveal">
             <img
-              src="assets/img2.webp"
+              src="assets/img2-1023.webp"
+              srcset="assets/img2-640.webp 640w, assets/img2-1023.webp 1023w"
+              sizes="(min-width: 1024px) and (orientation: landscape) 40vw, min(100vw, 35rem)"
+              fetchpriority="high"
               alt="The Blend Bar signature atomizer, gold on stone"
               width="1023"
               height="1537"
@@ -143,6 +146,8 @@
           <figure class="product-figure reveal">
             <img
               src="assets/img3.jpeg"
+              loading="lazy"
+              decoding="async"
               alt="The Blend N&deg;1 emblem"
               width="1254"
               height="1254"
