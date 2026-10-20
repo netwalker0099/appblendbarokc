@@ -47,7 +47,7 @@ function ingredientName(id) {
 }
 
 function summarize(scent) {
-  if (!scent.items.length) return 'No formula yet'
+  if (!scent.items.length) return 'No formula yet — can’t be sold at intake'
   return scent.items.map((i) => `${ingredientName(i.ingredient_id)} ${formatMl(i.amount_ml)}ml`).join(' · ')
 }
 
@@ -58,9 +58,15 @@ function priceSummary(scent) {
   return parts.length ? parts.join(' · ') : 'No prices set'
 }
 
-/// An empty formula is allowed (the recipe isn't written yet, but prices can
-/// be); anything entered must add up to 100 ml before it can be saved.
-const formulaBlocked = (id) => forms[id].length > 0 && !formulaCheck(forms[id]).ok
+/// An empty formula is allowed on an inactive scent (the recipe isn't written
+/// yet, but prices can be); anything entered must add up to 100 ml before it
+/// can be saved. An active scent can't have its formula emptied: intake needs
+/// it to pour the bottle, and the API refuses it.
+const formulaBlocked = (id) => {
+  if (forms[id].length > 0) return !formulaCheck(forms[id]).ok
+  const scent = props.scents.find((s) => s.id === id)
+  return Boolean(scent?.active && scent.items.length)
+}
 
 const priceVal = (v) => (v === '' || v === null ? null : Number(v))
 
@@ -124,7 +130,14 @@ async function save(scent) {
         <button class="ghost" type="button" style="flex: none" @click="expanded[scent.id] = !expanded[scent.id]">
           {{ expanded[scent.id] ? 'Close' : 'Edit' }}
         </button>
-        <button class="ghost" type="button" style="flex: none" @click="emit('toggle', scent)">
+        <button
+          class="ghost"
+          type="button"
+          style="flex: none"
+          :disabled="!scent.active && !scent.items.length"
+          :title="!scent.active && !scent.items.length ? 'Add a formula totalling 100 ml first' : ''"
+          @click="emit('toggle', scent)"
+        >
           {{ scent.active ? 'Deactivate' : 'Activate' }}
         </button>
       </div>
@@ -154,7 +167,12 @@ async function save(scent) {
           {{ saving[scent.id] ? 'Saving…' : 'Save formula & prices' }}
         </button>
         <p class="muted field-help" v-if="formulaBlocked(scent.id)">
-          The formula has to add up to 100 ml before this scent can be saved.
+          <template v-if="forms[scent.id].length">
+            The formula has to add up to 100 ml before this scent can be saved.
+          </template>
+          <template v-else>
+            An active scent needs its formula — deactivate it first to remove it.
+          </template>
         </p>
       </template>
     </div>

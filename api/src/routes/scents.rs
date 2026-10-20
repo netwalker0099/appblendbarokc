@@ -133,8 +133,13 @@ pub async fn create(
     validate_formula(&state.db, &items).await?;
 
     let mut tx = state.db.begin().await?;
-    let scent = sqlx::query_as::<_, Scent>("insert into scents (name) values ($1) returning *")
+    // A scent with no formula can't be sold at intake, so it starts switched
+    // off; Catalog switches it on once the formula is in.
+    let scent = sqlx::query_as::<_, Scent>(
+        "insert into scents (name, active) values ($1, $2) returning *",
+    )
         .bind(name)
+        .bind(!items.is_empty())
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| match &e {
@@ -195,6 +200,36 @@ pub async fn update(
     }
 
     let mut tx = state.db.begin().await?;
+
+    // An active scent must have a formula: switching one on without a formula,
+    // or clearing the formula of one that is on, is refused. A scent that was
+    // already on without one (from before this rule) can still have its name
+    // and prices edited.
+    let was_active: Option<bool> = sqlx::query_scalar("select active from scents where id = $1")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let was_active = was_active.ok_or_else(|| AppError::NotFound("scent not found".into()))?;
+    let will_be_active = body.active.unwrap_or(was_active);
+    if will_be_active {
+        let formula_after = match &body.items {
+            Some(items) => items.len() as i64,
+            None => sqlx::query_scalar("select count(*) from scent_items where scent_id = $1")
+                .bind(id)
+                .fetch_one(&mut *tx)
+                .await?,
+        };
+        let switching_on = !was_active;
+        let clearing = body.items.as_ref().is_some_and(|i| i.is_empty());
+        if formula_after == 0 && (switching_on || clearing) {
+            return Err(AppError::BadRequest(
+                "an active scent needs a formula totalling 100 ml — add it before \
+                 switching the scent on (or switch it off to remove the formula)"
+                    .into(),
+            ));
+        }
+    }
+
     sqlx::query_as::<_, Scent>(
         r#"
         update scents set
@@ -235,6 +270,35 @@ pub async fn update(
 }
 
 /// Used by the intake handler to validate a `set_perfume` order's `scent_id`.
+/// A house scent intake can sell: active, with a formula that totals 100 ml at
+/// the base — so every bottle size pours exactly (50 ml for 1.7 oz, 30 ml for
+/// 1 oz, 10 ml for a roller or spray). Staff pour a set perfume from this
+/// formula; without one there is nothing to measure.
+pub async fn assert_sellable_scent(pool: &PgPool, id: Uuid) -> Result<(), AppError> {
+    assert_active_scent(pool, id).await?;
+    let name: String = sqlx::query_scalar("select name from scents where id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await?;
+    let amounts: Vec<Decimal> =
+        sqlx::query_scalar("select amount_ml from scent_items where scent_id = $1")
+            .bind(id)
+            .fetch_all(pool)
+            .await?;
+    if amounts.is_empty() {
+        return Err(AppError::BadRequest(format!(
+            "\"{name}\" has no formula yet — add one totalling 100 ml in Admin → Catalog \
+             before selling it"
+        )));
+    }
+    check_formula_total(amounts).map_err(|_| {
+        AppError::BadRequest(format!(
+            "\"{name}\"'s formula doesn't total 100 ml — fix it in Admin → Catalog before \
+             selling it, or every bottle would be over- or under-filled"
+        ))
+    })
+}
+
 pub async fn assert_active_scent(pool: &PgPool, id: Uuid) -> Result<(), AppError> {
     let exists: bool =
         sqlx::query_scalar("select exists(select 1 from scents where id = $1 and active = true)")

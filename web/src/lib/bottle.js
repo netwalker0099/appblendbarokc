@@ -1,6 +1,7 @@
 /// Mix amounts are always stored as the 3.4oz base formula; every other size is
-/// derived here at display time, never stored per size. Mirrors the note on
-/// `MixItem` in the API.
+/// derived here at display time, never stored per size. Staff may *enter* a
+/// blend in any size's ml (MixBuilder converts with toBaseMl). Mirrors the note
+/// on `MixItem` in the API.
 ///
 /// Two pairs share a factor because they hold the same volume and so take the
 /// same pour, differing only in the bottle and the price:
@@ -84,33 +85,68 @@ export function totalMl(items, size = 'oz3_4') {
 /// the API, which refuses anything else — this only says so before saving.
 export const BASE_FORMULA_ML = 100
 
-/// Where a formula stands against BASE_FORMULA_ML: { ok, total, message }.
-/// Worked in hundredths of a ml — the precision amounts are stored at — so
-/// 33.3 + 33.3 + 33.4 isn't let down by float rounding, and an amount finer
-/// than 0.01 ml (which the API refuses) is caught here first.
-export function formulaCheck(items) {
-  if (!items.length) return { ok: false, total: 0, message: 'Add ingredients totalling 100 ml.' }
-  let hundredths = 0
+/// How full a bottle is, in ml: 100 / 100 / 50 / 30 / 10 / 10. A blend for that
+/// size must add up to exactly this.
+export function bottleMl(size) {
+  return BASE_FORMULA_ML * bottleFactor(size)
+}
+
+/// Formula amounts are stored at the 3.4 oz base to four decimal places
+/// (numeric(8,4) in the API). Staff enter a blend in the ml of the bottle they
+/// are filling, and these convert between the two.
+///
+/// Most sizes convert exactly (x2 for 1.7 oz, x10 for roller and spray). The
+/// 1 oz bottle is x100/30, which repeats — 10 ml there is 33.3333… at the base —
+/// hence four places, and hence the check below allowing for that last place.
+const BASE_DP = 10000
+
+export function toBaseMl(sizeMl, size) {
+  const n = Number(sizeMl)
+  if (!Number.isFinite(n)) return n
+  return Math.round((n / bottleFactor(size)) * BASE_DP) / BASE_DP
+}
+
+/// A base amount as it reads in the given size, to the 0.01 ml staff measure in.
+export function fromBaseMl(baseMl, size) {
+  const n = Number(baseMl)
+  if (!Number.isFinite(n)) return n
+  return Math.round(n * bottleFactor(size) * 100) / 100
+}
+
+/// Where a formula stands for the bottle being filled: { ok, total, message }.
+/// `items` hold base amounts (as stored); `size` is the bottle the amounts were
+/// entered for, and the message speaks in that bottle's ml.
+///
+/// The test is the API's: base amounts total 100 ml, give or take half of the
+/// fourth decimal place per ingredient (the 1 oz rounding above). Worked in
+/// ten-thousandths so float arithmetic can't nudge the answer.
+export function formulaCheck(items, size = 'oz3_4') {
+  const target = bottleMl(size)
+  const label = bottleLabel(size)
+  if (!items.length) {
+    return { ok: false, total: 0, message: `Add ingredients totalling ${formatMl(target)} ml for the ${label}.` }
+  }
+  let units = 0
   for (const item of items) {
     const n = Number(item.amount_ml)
     if (item.amount_ml === '' || !Number.isFinite(n) || n <= 0) {
       return { ok: false, total: null, message: 'Every ingredient needs an amount above 0.' }
     }
-    const h = Math.round(n * 100)
-    if (Math.abs(n * 100 - h) > 1e-6) {
-      return { ok: false, total: null, message: 'Amounts can be measured to 0.01 ml at most.' }
-    }
-    hundredths += h
+    units += Math.round(n * BASE_DP)
   }
-  const total = hundredths / 100
-  const gap = (BASE_FORMULA_ML * 100 - hundredths) / 100
-  if (gap === 0) return { ok: true, total, message: `Adds up to ${BASE_FORMULA_ML} ml.` }
+  const gapUnits = BASE_FORMULA_ML * BASE_DP - units
+  // In the bottle's own ml, to the hundredth staff can measure.
+  const total = Math.round((units / BASE_DP) * bottleFactor(size) * 100) / 100
+  if (Math.abs(gapUnits) <= items.length / 2) {
+    return { ok: true, total: target, message: `Adds up to ${formatMl(target)} ml for the ${label}.` }
+  }
+  const gap = Math.round((gapUnits / BASE_DP) * bottleFactor(size) * 100) / 100
   return {
     ok: false,
     total,
     message:
       gap > 0
-        ? `Totals ${formatMl(total)} ml — add ${formatMl(gap)} ml to reach ${BASE_FORMULA_ML} ml.`
-        : `Totals ${formatMl(total)} ml — remove ${formatMl(-gap)} ml to get down to ${BASE_FORMULA_ML} ml.`,
+        ? `Totals ${formatMl(total)} ml — add ${formatMl(gap)} ml to fill the ${label} (${formatMl(target)} ml).`
+        : `Totals ${formatMl(total)} ml — remove ${formatMl(-gap)} ml to fit the ${label} (${formatMl(target)} ml).`,
   }
 }

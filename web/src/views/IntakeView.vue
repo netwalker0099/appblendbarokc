@@ -16,7 +16,7 @@ import { useRoute, useRouter } from 'vue-router'
 import MixBuilder from '../components/MixBuilder.vue'
 import PayPanel from '../components/PayPanel.vue'
 import { api } from '../lib/api.js'
-import { BOTTLE_SIZES, bottleLabel, formatMl, formulaCheck, ORDER_TYPES } from '../lib/bottle.js'
+import { BOTTLE_SIZES, bottleLabel, bottleMl, formatMl, formulaCheck, fromBaseMl, ORDER_TYPES } from '../lib/bottle.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -94,12 +94,33 @@ function removeLine(i) {
   lines.value.splice(i, 1)
 }
 
-/** House formula for a chosen set-perfume, so the operator can see what's in it. */
-function scentFormula(id) {
+/** House formula for a chosen set-perfume, as poured into the line's bottle. */
+function scentFormula(id, size) {
   const scent = scents.value.find((s) => s.id === id)
   if (!scent || !scent.items?.length) return ''
-  return scent.items.map((i) => `${ingredientName(i.ingredient_id)} ${formatMl(i.amount_ml)}ml`).join(' · ')
+  const parts = scent.items.map(
+    (i) => `${ingredientName(i.ingredient_id)} ${formatMl(fromBaseMl(i.amount_ml, size))} ml`,
+  )
+  return `${parts.join(' · ')} = ${formatMl(bottleMl(size))} ml for the ${bottleLabel(size)}`
 }
+
+/**
+ * A house scent can only be sold once its formula totals 100 ml at the base,
+ * so every bottle pours exactly (50 / 30 / 10 ml). The API refuses it
+ * otherwise; this greys it out first.
+ */
+function scentReady(id) {
+  const scent = scents.value.find((s) => s.id === id)
+  return Boolean(scent?.items?.length) && formulaCheck(scent.items).ok
+}
+
+/** House scents in the chosen package that can't be sold yet, by name. */
+const bundleBlockers = computed(() => {
+  if (!selectedBundle.value) return []
+  return selectedBundle.value.items
+    .filter((item) => item.type === 'set_perfume' && !scentReady(item.scent_id))
+    .map((item) => scents.value.find((s) => s.id === item.scent_id)?.name || 'A scent')
+})
 
 /** Catalogue price for a line, shown so staff know what will be charged. */
 function catalogPrice(line) {
@@ -113,17 +134,19 @@ const settings = ref(null)
 
 function lineIsValid(line) {
   if (!(Number(line.quantity) >= 1)) return false
-  if (line.type === 'set_perfume') return Boolean(line.scent_id)
+  if (line.type === 'set_perfume') return Boolean(line.scent_id) && scentReady(line.scent_id)
   // A blend nobody named is one nobody can find again.
   if (!line.mixName.trim()) return false
-  // Must total exactly 100 ml at the base; MixBuilder shows how far off it is.
-  return formulaCheck(line.items).ok
+  // Must fill the chosen bottle exactly (100 / 50 / 30 / 10 ml); MixBuilder
+  // shows how far off it is.
+  return formulaCheck(line.items, line.size).ok
 }
 
 const canSubmit = computed(() => {
   if (busy.value) return false
   if (!email.value.includes('@')) return false
   if (!lines.value.length && !bundleId.value) return false
+  if (bundleBlockers.value.length) return false
   return lines.value.every(lineIsValid)
 })
 
@@ -374,6 +397,11 @@ function startAnother() {
         <p class="muted" style="margin: 0.5rem 0 0; font-size: 0.85rem">
           To sell a different size, add it as its own item below instead.
         </p>
+        <p class="danger-text" v-if="bundleBlockers.length" role="alert" style="margin: 0.5rem 0 0">
+          {{ bundleBlockers.join(', ') }} {{ bundleBlockers.length > 1 ? 'have' : 'has' }} no
+          complete formula yet, so this package can’t be sold. Add one totalling 100 ml in
+          Admin → Catalog.
+        </p>
       </div>
     </div>
 
@@ -453,13 +481,19 @@ function startAnother() {
               :key="scent.id"
               type="button"
               :aria-pressed="line.scent_id === scent.id"
+              :disabled="!scentReady(scent.id)"
+              :title="scentReady(scent.id) ? '' : 'No complete formula yet — add one in Admin → Catalog'"
               @click="line.scent_id = scent.id"
             >
-              {{ scent.name }}
+              {{ scent.name }}{{ scentReady(scent.id) ? '' : ' — no formula' }}
             </button>
           </div>
-          <p class="muted" v-if="scentFormula(line.scent_id)" style="margin-top: 0.5rem">
-            {{ scentFormula(line.scent_id) }}
+          <p class="muted" v-if="activeScents.some((s) => !scentReady(s.id))" style="margin-top: 0.4rem; font-size: 0.85rem">
+            Scents marked “no formula” can’t be sold here until their formula (totalling
+            100 ml) is added in Admin → Catalog — staff need it to pour the bottle.
+          </p>
+          <p class="muted" v-if="scentFormula(line.scent_id, line.size)" style="margin-top: 0.5rem">
+            {{ scentFormula(line.scent_id, line.size) }}
           </p>
         </div>
       </template>

@@ -24,7 +24,7 @@ use crate::models::order::{BottleSize, Order, OrderStatus, OrderType};
 use crate::models::sync::SyncEntity;
 use crate::routes::ingredients::assert_active_ingredients;
 use crate::routes::mixes::{fetch_mix_detail, MixDetail, MixItemInput};
-use crate::routes::scents::assert_active_scent;
+use crate::routes::scents::assert_sellable_scent;
 use crate::AppState;
 
 /// Guard against a runaway client; a stand order is a handful of bottles.
@@ -321,7 +321,7 @@ async fn resolve_line(
             let scent_id = item.scent_id.ok_or_else(|| {
                 AppError::BadRequest("a set_perfume line needs a scent".into())
             })?;
-            assert_active_scent(&state.db, scent_id).await?;
+            assert_sellable_scent(&state.db, scent_id).await?;
         }
     }
 
@@ -391,7 +391,7 @@ async fn resolve_bundle(
     for (i, (order_type, size, scent_id, quantity)) in components.into_iter().enumerate() {
         // A custom blend inside a package still has to be built at the bar; the
         // operator adds it as its own line. Only set perfumes can be expanded
-        // automatically, because they need no formula.
+        // automatically, because their formula is already in the Catalog.
         if order_type == OrderType::CustomMix {
             return Err(AppError::BadRequest(format!(
                 "the \"{name}\" package contains a custom blend — add that line \
@@ -403,7 +403,7 @@ async fn resolve_bundle(
                 "the \"{name}\" package has a set-perfume slot with no scent chosen"
             ))
         })?;
-        assert_active_scent(&state.db, scent_id).await?;
+        assert_sellable_scent(&state.db, scent_id).await?;
 
         // Per bottle, not per line — orders store a unit amount.
         let per_unit = crate::square::money::from_cents(split[i] / quantity.max(1) as i64);

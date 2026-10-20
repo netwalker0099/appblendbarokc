@@ -1,7 +1,17 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 
-import { BOTTLE_SIZES, INGREDIENT_TYPES, formatMl, formulaCheck, scaleMl, totalMl } from '../lib/bottle.js'
+import {
+  BOTTLE_SIZES,
+  INGREDIENT_TYPES,
+  bottleLabel,
+  bottleMl,
+  formatMl,
+  formulaCheck,
+  fromBaseMl,
+  toBaseMl,
+  totalMl,
+} from '../lib/bottle.js'
 
 /// Mirrors MAX_MIX_INGREDIENTS in the API. The server is still the authority —
 /// this only keeps the operator from building a mix that would be rejected.
@@ -10,6 +20,9 @@ const MAX_INGREDIENTS = 8
 const props = defineProps({
   modelValue: { type: Array, required: true },
   ingredients: { type: Array, required: true },
+  /// The bottle being filled. Amounts are typed in this bottle's ml and must
+  /// add up to its volume; v-model still carries 3.4 oz base amounts, which is
+  /// what the API stores.
   size: { type: String, default: 'oz3_4' },
 })
 
@@ -25,9 +38,29 @@ const available = computed(() => activeIngredients.value.filter((i) => !chosenId
 
 const atCap = computed(() => props.modelValue.length >= MAX_INGREDIENTS)
 
-/// The 100 ml rule, shown live. The screens that save a formula disable their
-/// button on the same check; the API refuses it regardless.
-const status = computed(() => formulaCheck(props.modelValue))
+/// The bottle's volume rule, shown live. The screens that save a formula
+/// disable their button on the same check; the API refuses it regardless.
+const status = computed(() => formulaCheck(props.modelValue, props.size))
+
+const targetMl = computed(() => bottleMl(props.size))
+
+/// What a row's box shows while it is being typed in. Without this, typing
+/// "3." would round-trip through the base amount and come back as "3",
+/// eating the decimal point. Cleared on blur and when the size changes.
+const drafts = reactive({})
+watch(
+  () => props.size,
+  () => Object.keys(drafts).forEach((k) => delete drafts[k]),
+)
+
+/// Rows whose typed amount is finer than 0.01 ml — what can be measured.
+const tooFine = reactive({})
+
+function shownAmount(index, item) {
+  if (drafts[index] !== undefined) return drafts[index]
+  if (item.amount_ml === '' || item.amount_ml == null) return ''
+  return fromBaseMl(item.amount_ml, props.size)
+}
 
 function nameFor(id) {
   return props.ingredients.find((i) => i.id === id)?.name ?? 'Unknown ingredient'
@@ -64,7 +97,11 @@ function optionsFor(index) {
 
 function addIngredient() {
   if (!picking.value || atCap.value) return
-  emit('update:modelValue', [...props.modelValue, { ingredient_id: picking.value, amount_ml: 1 }])
+  // 1 ml in the bottle being filled.
+  emit('update:modelValue', [
+    ...props.modelValue,
+    { ingredient_id: picking.value, amount_ml: toBaseMl(1, props.size) },
+  ])
   picking.value = ''
 }
 
@@ -75,14 +112,28 @@ function setIngredient(index, value) {
   emit('update:modelValue', next)
 }
 
+/// `value` is in the bottle's ml; it is stored as the base amount.
 function setAmount(index, value) {
+  drafts[index] = value
+  const fine = value !== '' && /\.\d{3,}/.test(String(value))
+  if (fine) tooFine[index] = true
+  else delete tooFine[index]
   const next = props.modelValue.map((item, i) =>
-    i === index ? { ...item, amount_ml: value === '' ? '' : Number(value) } : item,
+    i === index
+      ? { ...item, amount_ml: value === '' || fine ? '' : toBaseMl(value, props.size) }
+      : item,
   )
   emit('update:modelValue', next)
 }
 
+function endEdit(index) {
+  if (!tooFine[index]) delete drafts[index]
+}
+
 function removeAt(index) {
+  // Row positions shift; drop per-row typing state rather than misattribute it.
+  Object.keys(drafts).forEach((k) => delete drafts[k])
+  Object.keys(tooFine).forEach((k) => delete tooFine[k])
   emit(
     'update:modelValue',
     props.modelValue.filter((_, i) => i !== index),
@@ -95,8 +146,9 @@ function removeAt(index) {
     <h2>Mix builder — {{ modelValue.length }}/{{ MAX_INGREDIENTS }}</h2>
 
     <p class="muted" style="margin-top: -0.4rem">
-      Amounts are in millilitres (ml), measured at the 3.4 oz base formula, and
-      must add up to exactly 100 ml — every other bottle size is scaled from it.
+      Amounts are what you pour for the <strong>{{ bottleLabel(size) }}</strong>, in
+      millilitres, and must add up to exactly {{ formatMl(targetMl) }} ml. The pour
+      chart below shows the same blend in every size.
     </p>
 
     <p class="muted" v-if="!activeIngredients.length">
@@ -122,9 +174,11 @@ function removeAt(index) {
         inputmode="decimal"
         min="0.01"
         step="0.01"
-        :value="item.amount_ml"
-        :aria-label="`${nameFor(item.ingredient_id)} amount in millilitres`"
+        :value="shownAmount(index, item)"
+        :aria-label="`${nameFor(item.ingredient_id)} amount in millilitres for the ${bottleLabel(size)}`"
+        :aria-invalid="tooFine[index] ? 'true' : undefined"
         @input="setAmount(index, $event.target.value)"
+        @blur="endEdit(index)"
       />
       <span class="unit" aria-hidden="true">ml</span>
       <button class="icon" type="button" :aria-label="`Remove ${nameFor(item.ingredient_id)}`" @click="removeAt(index)">
@@ -132,6 +186,9 @@ function removeAt(index) {
       </button>
     </div>
 
+    <p v-if="Object.keys(tooFine).length" class="formula-status bad" role="alert">
+      Amounts can be measured to 0.01 ml at most.
+    </p>
     <p
       v-if="modelValue.length"
       class="formula-status"
@@ -159,10 +216,10 @@ function removeAt(index) {
       Maximum of {{ MAX_INGREDIENTS }} ingredients reached.
     </p>
 
-    <!-- Pour chart: enter amounts once at the 3.4oz base and every bottle size is
-         derived here (1.7oz is half; roller and spray are a tenth — both are
-         10 ml, differing only in the closure). The size being ordered, if any,
-         is highlighted. -->
+    <!-- Pour chart: the blend is stored once at the 3.4oz base and every bottle
+         size is derived here (1.7oz is half; roller and spray are a tenth — both
+         are 10 ml, differing only in the closure). The size being filled is
+         highlighted. -->
     <template v-if="modelValue.length">
       <p class="muted pour-caption">Pour chart — amounts per bottle size (ml)</p>
       <div class="pour-chart">
@@ -179,7 +236,7 @@ function removeAt(index) {
             <tr v-for="item in modelValue" :key="item.ingredient_id">
               <td class="ing">{{ nameFor(item.ingredient_id) }}</td>
               <td v-for="s in BOTTLE_SIZES" :key="s.value" :class="{ current: s.value === size }">
-                {{ formatMl(scaleMl(item.amount_ml, s.value)) }}
+                {{ formatMl(fromBaseMl(item.amount_ml, s.value)) }}
               </td>
             </tr>
           </tbody>
@@ -187,7 +244,7 @@ function removeAt(index) {
             <tr>
               <td class="ing">Total</td>
               <td v-for="s in BOTTLE_SIZES" :key="s.value" :class="{ current: s.value === size }">
-                {{ formatMl(totalMl(modelValue, s.value)) }}
+                {{ formatMl(Math.round(totalMl(modelValue, s.value) * 100) / 100) }}
               </td>
             </tr>
           </tfoot>
