@@ -1,9 +1,17 @@
 <script setup>
+import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { currentUser, isAdmin, logout } from './lib/auth.js'
+import { updateAvailable, watchForUpdates } from './lib/version.js'
 
 const router = useRouter()
+
+onMounted(watchForUpdates)
+
+function reload() {
+  window.location.reload()
+}
 
 async function onLogout() {
   await logout()
@@ -29,12 +37,35 @@ async function onLogout() {
     </nav>
   </header>
 
+  <div class="update-banner" v-if="updateAvailable" role="status">
+    <span>This app has been updated. Reload to use the latest version — finish or
+    save anything you’re in the middle of first.</span>
+    <button type="button" @click="reload">Reload</button>
+  </div>
+
   <main>
     <RouterView />
   </main>
 </template>
 
 <style scoped>
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 1rem;
+  background: var(--ink, #211c15);
+  color: #fff;
+  font-size: 0.92rem;
+}
+.update-banner span {
+  flex: 1;
+  min-width: 14rem;
+}
+.update-banner button {
+  flex: none;
+}
 .who {
   color: var(--muted);
   font-size: 0.78rem;
