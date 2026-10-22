@@ -1,0 +1,17 @@
+# The Blend Bar — theblendbarokc.com
+#
+# Served only on the production host. sandbox.theblendbarokc.com and the staff
+# app answer robots.txt with "Disallow: /" from the Caddyfile instead, so the
+# test copy of this site and the staff app stay out of search results.
+
+User-agent: *
+# Personal pages: a customer's portal, scent links shared with one person, and
+# the page shown after paying.
+Disallow: /portal
+Disallow: /s/
+Disallow: /thanks
+# The API, except shop photos, which are fine to appear in image search.
+Disallow: /api/
+Allow: /api/public/shop/images/
+
+Sitemap: https://theblendbarokc.com/sitemap.xml

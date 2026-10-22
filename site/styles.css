@@ -1794,6 +1794,142 @@ section:not(.band) .tile {
   }
 }
 
+/* ==========================================================================
+   Privacy policy (/privacy) and cookie notice (cookie-notice.js)
+   ========================================================================== */
+
+/* Long-form legal text: the narrow measure, quiet headings, real lists. */
+.legal-doc {
+  max-width: var(--wrap-narrow);
+}
+
+.legal-doc h1 {
+  margin-bottom: 0.4rem;
+}
+
+.legal-doc > p,
+.legal-doc li {
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.legal-doc h2 {
+  font-size: clamp(1.35rem, 2.6vw, 1.7rem);
+  margin: 2.6rem 0 0.8rem;
+  scroll-margin-top: 4.5rem;
+}
+
+.legal-doc h3 {
+  font-size: 1.1rem;
+  margin: 1.5rem 0 0.4rem;
+}
+
+.legal-doc ul {
+  padding-left: 1.2rem;
+}
+
+.legal-doc li + li {
+  margin-top: 0.5rem;
+}
+
+.legal-doc a {
+  text-decoration: underline;
+}
+
+.legal-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.1rem;
+  margin: 1.6rem 0 0.4rem;
+  padding: 1rem 1.2rem;
+  background: var(--cream);
+  border-radius: var(--r-input);
+  font-size: 0.95rem;
+}
+
+.legal-toc a {
+  text-decoration: none;
+}
+
+/* The cookie table scrolls sideways on its own rather than widening the page. */
+.legal-table {
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+
+.legal-table table {
+  width: 100%;
+  min-width: 34rem;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.legal-table th,
+.legal-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.6rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.legal-table th {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Bottom-pinned, compact, never covering the whole screen. */
+.cookie-notice {
+  position: fixed;
+  z-index: 30;
+  left: 1rem;
+  right: 1rem;
+  bottom: 1rem;
+  margin: 0 auto;
+  max-width: 44rem;
+  padding: 0.9rem 1rem 0.9rem 1.3rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: var(--paper);
+  color: var(--text);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-lift);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.cookie-notice p {
+  margin: 0;
+  flex: 1;
+}
+
+.cookie-notice a {
+  text-decoration: underline;
+}
+
+.cookie-notice .btn {
+  flex: none;
+  padding: 0.55rem 1.2rem;
+  font-size: 0.95rem;
+}
+
+@media (max-width: 520px) {
+  .cookie-notice {
+    left: 0.6rem;
+    right: 0.6rem;
+    bottom: 0.6rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.7rem;
+  }
+}
+
+@media print {
+  .cookie-notice {
+    display: none;
+  }
+}
+
 /* Touch targets. On a touch screen every link and button is at least 44px
    tall (Apple's and WCAG's minimum); with a mouse the compact sizes above
    stay. Last in the file so the shop's own sizes above don't override it.

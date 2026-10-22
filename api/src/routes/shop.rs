@@ -797,6 +797,51 @@ pub struct ShopCheckoutResponse {
     pub total_cents: i64,
 }
 
+/// `sitemap.xml` for the customer site: its fixed pages plus one entry per item
+/// the shop currently shows, so a new listing is findable by search engines
+/// without anyone editing a file. Served at `/sitemap.xml` on the production
+/// host (Caddy rewrites to this); the sandbox host tells crawlers to stay away.
+///
+/// Built from [`catalogue`], so it lists exactly what a visitor can see: hidden,
+/// archived and unpriced listings are left out. URLs use `CUSTOMER_SITE_URL`.
+/// Shared links (`/s/…`), the portal and the thank-you page are deliberately
+/// not listed; robots.txt keeps crawlers out of them too.
+pub async fn sitemap(State(state): State<AppState>) -> Result<Response, AppError> {
+    const PAGES: [&str; 4] = ["/", "/shop", "/book", "/privacy"];
+    let base = crate::routes::public::site_url();
+    let base = base.trim_end_matches('/');
+    let shop = catalogue(State(state)).await?.0;
+
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
+    );
+    let urls = PAGES
+        .iter()
+        .map(|p| format!("{base}{p}"))
+        .chain(shop.products.iter().map(|p| format!("{base}/shop/{}", p.id)));
+    for url in urls {
+        xml.push_str("  <url><loc>");
+        xml.push_str(&xml_escape(&url));
+        xml.push_str("</loc></url>\n");
+    }
+    xml.push_str("</urlset>\n");
+
+    Ok(Response::builder()
+        .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")
+        .header(header::CACHE_CONTROL, "public, max-age=3600")
+        .body(Body::from(xml))
+        .expect("static headers are valid"))
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 /// A bag line after pricing: everything needed to write it and send it on.
 struct PricedLine {
     product_id: Uuid,
@@ -1148,6 +1193,15 @@ pub async fn checkout(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn sitemap_urls_are_xml_escaped() {
+        assert_eq!(
+            xml_escape("https://x.test/a?b=1&c=<2>"),
+            "https://x.test/a?b=1&amp;c=&lt;2&gt;"
+        );
+    }
+
     use super::*;
 
     #[test]

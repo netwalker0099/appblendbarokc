@@ -255,6 +255,8 @@ pub fn build_router(state: AppState) -> Router {
         // The online shop. The catalogue and photos are read-only; the
         // checkout follows every rule of the share-page checkout above.
         .route("/api/public/shop", get(shop::catalogue))
+        // Served as /sitemap.xml on the production host (Caddy rewrites here).
+        .route("/api/public/sitemap.xml", get(shop::sitemap))
         .route("/api/public/shop/images/:id", get(shop::image))
         .route(
             "/api/public/shop/checkout",

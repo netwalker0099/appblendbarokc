@@ -19,6 +19,19 @@
 	# Force HTTPS for a year (this host is TLS-only via Caddy).
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
+	# Not for search engines: a staging copy, or the staff app. Every response
+	# says noindex, and robots.txt turns crawlers away (the file in site/ is
+	# for the production host only).
+	header X-Robots-Tag "noindex, nofollow"
+	handle /robots.txt {
+		respond `User-agent: *
+Disallow: /
+` 200
+	}
+	handle /sitemap.xml {
+		respond 404
+	}
+
 	handle /api/* {
 		reverse_proxy api:8080
 	}
@@ -55,6 +68,19 @@
 sandbox.theblendbarokc.com {
 	import security_headers
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	# Not for search engines: a staging copy, or the staff app. Every response
+	# says noindex, and robots.txt turns crawlers away (the file in site/ is
+	# for the production host only).
+	header X-Robots-Tag "noindex, nofollow"
+	handle /robots.txt {
+		respond `User-agent: *
+Disallow: /
+` 200
+	}
+	handle /sitemap.xml {
+		respond 404
+	}
 
 	handle /api/* {
 		reverse_proxy api:8080
@@ -105,6 +131,12 @@ theblendbarokc.com {
 	# No includeSubDomains here: on the apex it would force HTTPS on every
 	# subdomain of the business domain, including ones this box doesn't serve.
 	header Strict-Transport-Security "max-age=31536000"
+
+	# Generated from the live shop listings by the API (shop::sitemap).
+	handle /sitemap.xml {
+		rewrite * /api/public/sitemap.xml
+		reverse_proxy api:8080
+	}
 
 	handle /api/* {
 		reverse_proxy api:8080

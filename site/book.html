@@ -10,6 +10,7 @@
     />
     <link rel="icon" type="image/webp" href="/assets/img1.webp" />
     <link rel="stylesheet" href="/styles.css" />
+    <script src="/cookie-notice.js" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -131,10 +132,22 @@
         <p class="error-text" id="formError" hidden></p>
 
         <button class="btn solid" type="submit" id="submitBtn">Submit request</button>
+        <p class="field-hint">
+          We use these details only to plan your event. See our
+          <a href="/privacy">Privacy Policy</a>.
+        </p>
       </form>
 
       <div id="bookResult" hidden></div>
     </main>
+
+    <footer class="site-footer" id="footer">
+      <div class="wrap legal">
+        The Blend Bar · Oklahoma City ·
+        <a href="https://www.instagram.com/theblendbar.okc" rel="noopener">@theblendbar.okc</a> ·
+        <a href="/privacy">Privacy Policy</a>
+      </div>
+    </footer>
 
     <script src="/book.js"></script>
   </body>
