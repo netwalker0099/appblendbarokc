@@ -86,6 +86,10 @@ impl HttpSquare {
         self.send(self.client.post(self.url(path)).json(&body)).await
     }
 
+    async fn put(&self, path: &str, body: Value) -> Result<Value, SquareError> {
+        self.send(self.client.put(self.url(path)).json(&body)).await
+    }
+
     async fn get(&self, path: &str) -> Result<Value, SquareError> {
         self.send(self.client.get(self.url(path))).await
     }
@@ -484,7 +488,10 @@ impl Square for HttpSquare {
         }
 
         let resp = match &existing {
-            Some(id) => self.post(&format!("/v2/customers/{id}"), body).await?,
+            // UpdateCustomer is a PUT. It was a POST until 2026-10-22, which
+            // Square answers with 404, so every customer already in the
+            // Square directory failed to sync; new ones were unaffected.
+            Some(id) => self.put(&format!("/v2/customers/{id}"), body).await?,
             None => {
                 body["idempotency_key"] = json!(customer.id.to_string());
                 self.post("/v2/customers", body).await?
