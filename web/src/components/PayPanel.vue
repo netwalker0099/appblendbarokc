@@ -23,6 +23,10 @@ const emit = defineEmits(['paid', 'canceled'])
 
 const cart = ref(null)
 const terminals = ref([])
+/// From /api/square/ready. Null until known; a failure to ask leaves the
+/// buttons on, since the server refuses anything that can't work anyway.
+const ready = ref(null)
+const notConnected = computed(() => ready.value?.awaiting_connection === true)
 const link = ref(null)
 const busy = ref('')
 const error = ref('')
@@ -54,9 +58,14 @@ const CANCEL_REASONS = {
 
 onMounted(async () => {
   try {
-    const [c, t] = await Promise.all([api.getCart(props.cartId), api.listTerminals()])
+    const [c, t, r] = await Promise.all([
+      api.getCart(props.cartId),
+      api.listTerminals(),
+      api.squareReady().catch(() => null),
+    ])
     cart.value = c
     terminals.value = t
+    ready.value = r
     chosenTerminal.value = defaultTerminal.value?.id || null
     if (status.value === 'pending_payment') startPolling()
   } catch (err) {
@@ -215,6 +224,13 @@ const shortfall = computed(() =>
       <p v-else-if="status !== 'open' && status !== 'pending_payment'">This sale is {{ status }}.</p>
 
       <!-- Not sent yet: choose how to pay -->
+      <template v-else-if="status === 'open' && notConnected">
+        <p class="danger-text" role="alert">
+          Square isn’t connected yet, so no payment can be taken. An admin needs to press
+          <strong>Connect Square</strong> in Admin → Billing. The sale is saved and can be
+          charged once that’s done.
+        </p>
+      </template>
       <template v-else-if="status === 'open'">
         <template v-if="paired.length">
           <div class="field" v-if="paired.length > 1">

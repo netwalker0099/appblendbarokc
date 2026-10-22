@@ -110,6 +110,7 @@ pub fn build_router(state: AppState) -> Router {
                 .delete(terminal::remove),
         )
         .route("/api/square/status", get(square_status::status))
+        .route("/api/square/ready", get(square_status::ready))
         // Connect Square (OAuth). The callback is a GET because Square sends
         // the browser to it; it is still behind the employee session.
         .route("/api/square/oauth/start", post(square_oauth::start))

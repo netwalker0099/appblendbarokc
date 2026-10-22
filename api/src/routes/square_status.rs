@@ -68,3 +68,14 @@ pub async fn status(
         "default_terminal": default_terminal,
     })))
 }
+
+/// Whether payments can be taken right now. Readable by every operator, not
+/// just admins, so the charge screen can say "Square isn't connected" instead
+/// of offering a button that can only fail.
+pub async fn ready(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(json!({
+        "live": state.square.is_live(),
+        "backend": state.square.name(),
+        "awaiting_connection": state.square.awaiting_connection(),
+    }))
+}

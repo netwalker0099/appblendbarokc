@@ -60,6 +60,31 @@ pub struct Terminal {
 const TERMINAL_COLS: &str =
     "id, name, device_id, code, pair_by, status, is_default, created_at, paired_at";
 
+/// Square's published Sandbox test devices (the same list as the Admin →
+/// Billing Sandbox section). They exist only in Sandbox: in production a
+/// checkout sent to one can never be paid, so there they are hidden and
+/// refused. One stayed set as the default after the 2026-10-22 switch to
+/// production and was offered on the charge button.
+pub(crate) const NOT_CONNECTED: &str =
+    "Square isn't connected yet, so no payment can be taken — an admin needs to press \
+     Connect Square in Admin → Billing";
+
+const SANDBOX_TEST_DEVICE_IDS: [&str; 5] = [
+    "9fa747a2-25ff-48ee-b078-04381f7c828f",
+    "22cd266c-6246-4c06-9983-67f0c26346b0",
+    "841100b9-ee60-4537-9bcf-e30b2ba5e215",
+    "0a956d49-619a-4530-8e5e-8eac603ffc5e",
+    "da40d603-c2ea-4a65-8cfd-f42e36dab0c7",
+];
+
+fn is_production(state: &AppState) -> bool {
+    state.square.name() == "square-production"
+}
+
+fn is_sandbox_test_device(device_id: Option<&str>) -> bool {
+    device_id.is_some_and(|d| SANDBOX_TEST_DEVICE_IDS.contains(&d))
+}
+
 /// Every Terminal, paired ones first. Any employee: intake and checkout need to
 /// know whether there is one to charge on.
 pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<Terminal>>, AppError> {
@@ -71,12 +96,15 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<Terminal>>, 
     .execute(&state.db)
     .await?;
 
-    let rows = sqlx::query_as::<_, Terminal>(&format!(
+    let mut rows = sqlx::query_as::<_, Terminal>(&format!(
         "select {TERMINAL_COLS} from square_terminals \
          order by (status = 'paired') desc, is_default desc, created_at"
     ))
     .fetch_all(&state.db)
     .await?;
+    if is_production(&state) {
+        rows.retain(|t| !is_sandbox_test_device(t.device_id.as_deref()));
+    }
     Ok(Json(rows))
 }
 
@@ -132,6 +160,13 @@ pub async fn add_by_id(
     State(state): State<AppState>,
     Json(body): Json<AddByIdRequest>,
 ) -> Result<(StatusCode, Json<Terminal>), AppError> {
+    // Only Sandbox's pretend devices are added by id; a real Terminal pairs
+    // with a code, which proves it is signed in to this Square account.
+    if is_production(&state) {
+        return Err(AppError::BadRequest(
+            "in production a Terminal is paired with a code — use Get a pairing code".into(),
+        ));
+    }
     let name = clean_name(&body.name)?;
     let device_id = body.device_id.trim();
     if device_id.is_empty() || device_id.len() > 100 {
@@ -388,6 +423,9 @@ pub async fn charge(
         }
     }
 
+    if state.square.awaiting_connection() {
+        return Err(AppError::Unavailable(NOT_CONNECTED.into()));
+    }
     if items.is_empty() {
         return Err(AppError::BadRequest("cart is empty".into()));
     }
@@ -419,11 +457,13 @@ pub async fn charge(
         .await?
         .flatten(),
     };
-    let device_id = device_id.ok_or_else(|| {
-        AppError::BadRequest(
-            "no Square Terminal is paired — an admin can pair one in Admin → Billing".into(),
-        )
-    })?;
+    let device_id = device_id
+        .filter(|d| !(is_production(&state) && is_sandbox_test_device(Some(d))))
+        .ok_or_else(|| {
+            AppError::BadRequest(
+                "no Square Terminal is paired — an admin can pair one in Admin → Billing".into(),
+            )
+        })?;
 
     // The Square order: created once per cart, then reused by every attempt.
     let square_order_id = match &cart.square_order_id {

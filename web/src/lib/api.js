@@ -129,6 +129,8 @@ export const api = {
 
   // --- Square integration (admin) ---
   getSquareStatus: () => request('/square/status'),
+  // Any operator: can payments be taken right now? { live, backend, awaiting_connection }
+  squareReady: () => request('/square/ready'),
   // Connect Square (OAuth): returns { url } on Square to send the browser to.
   startSquareConnect: () => request('/square/oauth/start', { method: 'POST' }),
   renewSquareToken: () => request('/square/oauth/refresh', { method: 'POST' }),
